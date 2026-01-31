@@ -8,11 +8,12 @@ import textwrap
 import json
 import random
 import time
+import re
 
 # ==========================================
-# 0. 核心設定 (回到 V29 穩定版)
+# 0. 核心設定
 # ==========================================
-st.set_page_config(page_title="Brian AI 戰情室 (V29-穩定版)", page_icon="🦅", layout="centered")
+st.set_page_config(page_title="Brian AI 戰情室 (V34-智慧防彈版)", page_icon="🦅", layout="centered")
 
 # --- 字型設定 ---
 FONT_PATH_BOLD = "msjhbd.ttc" 
@@ -41,12 +42,12 @@ st.markdown("""
     .stButton>button { width: 100%; border-radius: 10px; background-color: #d63384; color: white; height: 3em; font-weight: bold; font-size: 1.2em; border: 2px solid #d63384;}
     .report-box { background-color: #fff0f6; padding: 20px; border-radius: 10px; border-left: 5px solid #d63384; color: #333; font-family: "Microsoft JhengHei";}
     .fengshui-box { background-color: #fff3cd; padding: 15px; border-radius: 5px; border-left: 5px solid #ffc107; margin-top: 10px; color: #856404;}
-    .god-mode-box { background-color: #e3f2fd; padding: 15px; border-radius: 5px; border-left: 5px solid #2196f3; color: #0d47a1; margin-bottom: 20px;}
+    .smart-input-box { background-color: #e8f5e9; padding: 15px; border-radius: 10px; border-left: 5px solid #4caf50; margin-bottom: 20px;}
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 資料庫讀取
+# 1. 資料庫與搜尋引擎
 # ==========================================
 @st.cache_data
 def load_data():
@@ -57,8 +58,24 @@ def load_data():
         if df.empty: return pd.DataFrame(), "EMPTY"
         if '成本底價' in df.columns:
              df['成本底價'] = df['成本底價'].astype(str).str.replace(',', '').str.replace('$', '').astype(float).astype(int)
+        df['車款名稱'] = df['車款名稱'].astype(str)
         return df, "SUCCESS"
     except Exception as e: return pd.DataFrame(), f"ERROR: {str(e)}"
+
+def smart_search(df, query):
+    if df.empty or not query: return None
+    keywords = str(query).lower().split()
+    def calculate_score(row_name):
+        row_name = row_name.lower()
+        score = 0
+        for k in keywords:
+            if k in row_name: score += 1
+        return score
+    search_df = df.copy()
+    search_df['score'] = search_df['車款名稱'].apply(calculate_score)
+    best_matches = search_df[search_df['score'] > 0].sort_values('score', ascending=False)
+    if not best_matches.empty: return best_matches.iloc[0].to_dict()
+    else: return None
 
 def get_best_model(api_key):
     genai.configure(api_key=api_key)
@@ -71,30 +88,95 @@ def get_best_model(api_key):
     except: return None
 
 # ==========================================
-# 2. AI 核心 (不進行預解析，直接分析)
+# 2. V34 核心：雙重解析引擎 (AI + Python Regex)
 # ==========================================
+
+# 第二層保險：用 Python 硬抓價格
+def backup_regex_parser(text):
+    # 尋找 "數字 + 萬" 或 "數字.數字 + 萬"
+    price_match = re.search(r'(\d+(\.\d+)?)\s*萬', text)
+    price = 0.0
+    car_name = text
+    
+    if price_match:
+        try:
+            price = float(price_match.group(1))
+            # 把價格從字串中拿掉，剩下的就是車名
+            car_name = text.replace(price_match.group(0), "").strip()
+        except:
+            pass
+            
+    # 如果沒寫「萬」，試著抓純數字 (假設在 1~500 之間)
+    if price == 0:
+        nums = re.findall(r'\d+(\.\d+)?', text)
+        for n in nums:
+            try:
+                val = float(n[0]) if isinstance(n, tuple) else float(n)
+                if 1 < val < 500: # 合理價格範圍
+                    price = val
+                    break
+            except:
+                continue
+                
+    return {"car_name": car_name, "price": price}
+
+def extract_info_from_text(api_key, raw_text):
+    target_model = get_best_model(api_key)
+    
+    # 1. 嘗試 AI 解析 (簡單格式，不求 JSON)
+    if target_model:
+        prompt = f"""
+        Parse this text: "{raw_text}"
+        Output format exactly like this:
+        CAR: [Car Name keywords]
+        PRICE: [Price Number only]
+        """
+        try:
+            model = genai.GenerativeModel(target_model)
+            response = model.generate_content(prompt)
+            txt = response.text
+            
+            # 簡單字串處理
+            car_name = ""
+            price = 0.0
+            
+            lines = txt.split('\n')
+            for line in lines:
+                if "CAR:" in line:
+                    car_name = line.split("CAR:")[1].strip()
+                if "PRICE:" in line:
+                    try:
+                        p_str = line.split("PRICE:")[1].strip().replace('萬', '')
+                        price = float(re.search(r'\d+(\.\d+)?', p_str).group(0))
+                    except: pass
+            
+            if car_name and price > 0:
+                return {"car_name": car_name, "price": price}
+        except:
+            pass # AI 失敗，進入備案
+
+    # 2. AI 失敗了 (或沒 Key)，啟動 Python 暴力解析
+    return backup_regex_parser(raw_text)
+
 def get_analysis(api_key, image, user_price, car_info, manual_car_name=None):
     target_model = get_best_model(api_key)
     if not target_model: return None, "找不到可用模型"
 
-    # 判斷輸入來源
     if car_info:
         name = car_info.get('車款名稱', '未知')
         cost = car_info.get('成本底價', 0)
         margin = int(user_price * 10000) - cost
-        db_context = f"數據庫匹配：{name}，底價${cost}，賣家開價${int(user_price*10000)}，價差${margin}。"
+        db_context = f"數據庫匹配：{name}，行情底價約${cost}，賣家開價${int(user_price*10000)}，價差${margin}。"
     else:
-        # 如果沒有選庫存，就用使用者輸入的名字 (如果有的話)
         name = manual_car_name if manual_car_name else "未知車款"
-        db_context = f"使用者手動輸入車款：{name}，開價${user_price}萬 (無數據庫底價參考)。"
+        db_context = f"使用者輸入車款：{name}，開價${user_price}萬 (資料庫無此車數據，請依市價盲測)。"
 
-    # 判斷有無照片
     if image:
         image_context = "請根據『上傳的照片』進行外觀與車況的毒舌分析。"
-        input_content = [image] # 有圖
+        input_content = [image]
     else:
-        image_context = f"使用者【沒有上傳照片】，請你發揮想像力，假設這是一台市面上常見的 {name} 中古車。請根據它的價格和車型進行『盲測毒舌』。"
-        input_content = [] # 無圖
+        image_context = f"使用者【沒有上傳照片】，請發揮想像力，假設這是一台 {name} 中古車。請根據價格和車型進行『盲測毒舌』。"
+        input_content = []
 
     prompt = f"""
     你現在是 Elon Musk，也是一位懂台灣民俗的科技算命師。
@@ -112,13 +194,33 @@ def get_analysis(api_key, image, user_price, car_info, manual_car_name=None):
     - "line_msg_aggressive": "寫一則給賣家的 LINE 訊息(老司機版)，直接亮底牌殺價。"
     """
     
-    input_content.insert(0, prompt) # 把提示詞放在最前面
+    input_content.insert(0, prompt)
 
     try:
         model = genai.GenerativeModel(target_model)
         response = model.generate_content(input_content)
-        txt = response.text.strip().replace('```json', '').replace('```', '')
-        return json.loads(txt), target_model
+        txt = response.text
+        
+        # 暴力解析回傳的 JSON
+        clean_txt = txt.strip().replace('```json', '').replace('```', '')
+        try:
+            return json.loads(clean_txt), target_model
+        except:
+             match = re.search(r'\{.*\}', txt, re.DOTALL)
+             if match:
+                 return json.loads(match.group(0)), target_model
+             else:
+                 # 真的爛掉時的 fallback
+                 return {
+                     "sucker_score": 87,
+                     "margin_analysis": "AI算不出來",
+                     "verdict_short": "ERROR",
+                     "musk_comment": "我的神經網路打結了，但這價格看起來還是像盤子。",
+                     "feng_shui": "雲端訊號干擾，這台車磁場太強了。",
+                     "line_msg_polite": "老闆，這車還在嗎？",
+                     "line_msg_aggressive": "這價格認真？"
+                 }, target_model
+
     except Exception as e:
         error_msg = str(e)
         if "429" in error_msg: return None, "RATE_LIMIT"
@@ -137,7 +239,6 @@ def create_report_card(car_image, ai_data, user_price, car_info):
         car_img_resized = car_image.resize((810, 500))
         card.paste(car_img_resized, (20, 100))
     else:
-        # 繪製一個 placeholder
         draw.rectangle((20, 100, 830, 600), fill=(50, 50, 50))
         draw.text((250, 300), "NO IMAGE UPLOADED", font=subtitle_font, fill=(100, 100, 100))
         draw.text((280, 350), "(盲測模式)", font=title_font, fill=(150, 150, 150))
@@ -145,7 +246,6 @@ def create_report_card(car_image, ai_data, user_price, car_info):
     draw.text((20, 25), "BRIAN AI | 智能戰情室 X 運勢分析", font=title_font, fill=(255, 0, 255))
     draw.line((20, 80, 830, 80), fill=(255, 0, 255), width=3)
 
-    # 數據區
     score = ai_data.get('sucker_score', 50)
     score_color = (255, 50, 50) if score > 70 else (0, 255, 0)
     draw.text((40, 630), "盤子指數", font=text_font, fill=(200, 200, 200))
@@ -162,7 +262,6 @@ def create_report_card(car_image, ai_data, user_price, car_info):
     draw.text((620, 630), "賣家開價", font=text_font, fill=(200, 200, 200))
     draw.text((620, 675), f"${user_price}萬", font=subtitle_font, fill=(255, 255, 255))
 
-    # 馬斯克評語
     START_Y_MUSK = 830 
     verdict = ai_data.get('verdict_short', 'N/A').upper()
     verdict_color = (255, 50, 50) if "RUN" in verdict else (0, 255, 0)
@@ -179,19 +278,15 @@ def create_report_card(car_image, ai_data, user_price, car_info):
         draw.text((x_comment, y_text), line, font=comment_font, fill=(230, 230, 230))
         y_text += 30
 
-    # 風水
     START_Y_FENGSHUI = 1050
     draw.line((20, START_Y_FENGSHUI - 20, 830, START_Y_FENGSHUI - 20), fill=(100, 100, 100), width=1)
-    
     feng_shui = ai_data.get('feng_shui', '分析中...')
     draw.text((20, START_Y_FENGSHUI), "🔮 Cyber Feng Shui (賽博風水)", font=subtitle_font, fill=(255, 215, 0))
-    
     fs_lines = textwrap.wrap(feng_shui, width=32)
     y_fs = START_Y_FENGSHUI + 50
     for line in fs_lines:
         draw.text((40, y_fs), line, font=text_font, fill=(255, 255, 200))
         y_fs += 35
-
     draw.text((20, 1250), "Powered by Brian's AI | 買車看數據，也看天意", font=small_font, fill=(100, 100, 100))
     return card
 
@@ -201,21 +296,18 @@ def create_report_card(car_image, ai_data, user_price, car_info):
 def main():
     with st.sidebar:
         st.header("🦅 控制台")
-        mode = st.radio("🤔 選擇模式：", ["自行搜尋 (老手)", "AI 幫我抽 (懶人)"])
+        mode = st.radio("🤔 選擇模式：", ["自行搜尋 (AI 智慧輸入)", "AI 幫我抽 (懶人)"])
         st.markdown("---")
         if "GOOGLE_API_KEY" in st.secrets:
             api_key = st.secrets["GOOGLE_API_KEY"]
             st.success("✅ API 金鑰已啟用")
         else:
             api_key = st.text_input("Google API Key", type="password")
-        st.caption("V29 (穩定版)")
+        st.caption("V34 (智慧防彈版)")
 
     st.title("🦅 拍賣場 AI 戰情室")
-
     df, status = load_data()
-    selected_car_info = None
 
-    # === Mode A: 抽籤 ===
     if mode == "AI 幫我抽 (懶人)":
         st.markdown("<div class='god-mode-box'><b>🎲 AI 靈籤模式：</b><br>不知道買什麼？輸入預算，讓 AI 幫你決定命運。</div>", unsafe_allow_html=True)
         col_a, col_b = st.columns(2)
@@ -223,97 +315,97 @@ def main():
         with col_b: usage_goal = st.selectbox("🎯 用車目的", ["純代步 (省油就好)", "把妹 (要帥)", "載家人 (要大)", "跑山 (要快)", "練車 (撞了不心疼)"])
         
         if st.button("🔮 幫我抽一台！"):
-            if status != "SUCCESS": st.error("⚠️ 資料庫未連線。")
-            else:
-                try:
-                    candidates = df[df['成本底價'] <= (budget_limit * 10000)].copy()
-                    if not candidates.empty:
-                        lucky_car = candidates.sample(1).iloc[0]
-                        st.session_state['god_car'] = lucky_car.to_dict()
-                        st.session_state['user_usage'] = usage_goal
-                        st.balloons()
-                    else: st.error("❌ 預算太低了... 買不到車！")
-                except: st.error("抽籤失敗")
-        
-        if 'god_car' in st.session_state:
-            car = st.session_state['god_car']
-            st.success(f"🎉 天選之車：**{car['車款名稱']}**")
-            st.info(f"💡 切換回「自行搜尋」模式，輸入 **{car['車款名稱']}** 來進行詳細分析！")
+            try:
+                candidates = df[df['成本底價'] <= (budget_limit * 10000)].copy()
+                if not candidates.empty:
+                    lucky_car = candidates.sample(1).iloc[0]
+                    st.session_state['god_car'] = lucky_car.to_dict()
+                    st.balloons()
+                    st.success(f"🎉 天選之車：**{lucky_car['車款名稱']}**")
+                    st.info(f"💡 切換回「自行搜尋」模式，直接貼上 **{lucky_car['車款名稱']}** 來分析！")
+                else: st.error("❌ 預算太低了... 買不到車！")
+            except: st.error("抽籤失敗")
 
-    # === Mode B: 自行搜尋 (最穩定的手動輸入模式) ===
     else:
-        # 1. 車款選擇 (可選填)
-        car_name_manual = ""
-        if status == "SUCCESS" and not df.empty:
-            car_options = ["--- 選擇車款 (有數據庫) ---"] + df['車款名稱'].astype(str).tolist()
-            selected_option = st.selectbox("🔍 選擇車款 (AI 將參考真實行情):", car_options)
-            
-            if selected_option != "--- 選擇車款 (有數據庫) ---":
-                row = df[df['車款名稱'] == selected_option].iloc[0]
-                selected_car_info = row.to_dict()
-                st.info(f"🎯 鎖定：{row['車款名稱']} | ✅ 已連線行情數據庫")
-            else:
-                # 讓使用者自己手動輸入 (沒在資料庫裡的車)
-                car_name_manual = st.text_input("📝 或手動輸入車款名稱 (例如: 2015 Mazda 3):")
+        st.markdown("### 🚀 智慧輸入 (貼上文字即可)")
+        smart_text = st.text_area("📋 直接貼上 8891 標題、FB 貼文、或朋友的訊息", height=100, placeholder="例如：售 2013 prius 20.8萬")
         
-        st.markdown("---")
-        
-        # 2. 價格輸入
-        col1, col2 = st.columns(2)
-        with col1:
-            price_input = st.number_input("賣家開價 (萬)", 1.0, 500.0, 60.0, step=0.5)
-        with col2:
-            st.caption(" ")
-            st.caption("💡 只要輸入價格跟車型，就算沒照片 AI 也能算命！")
+        with st.expander("🛠️ 手動微調 (AI 讀錯請點這)", expanded=False):
+            car_options = ["--- 未選擇 ---"] + (df['車款名稱'].astype(str).tolist() if not df.empty else [])
+            selected_option = st.selectbox("資料庫匹配:", car_options)
+            manual_car_input = st.text_input("或手動輸入車型:", value="")
+            manual_price_input = st.number_input("價格 (萬):", 0.0, 1000.0, 0.0, step=0.5)
 
-        # 3. 照片上傳 (變為選填)
-        uploaded_file = st.file_uploader("📸 上傳車輛照片 (選填，有照片會更準)", type=['jpg', 'png', 'jpeg'])
+        uploaded_file = st.file_uploader("📸 上傳截圖/照片 (選填，有圖更準)", type=['jpg', 'png', 'jpeg'])
         image = Image.open(uploaded_file) if uploaded_file else None
 
-        # 4. 按鈕區
         if api_key:
-            if image:
-                st.image(image, caption='待鑑價車輛', width=300)
-            
-            # 冷卻機制
             current_time = time.time()
             last_click_time = st.session_state.get('last_click_time', 0)
             COOLDOWN_SECONDS = 5
-
-            generate_btn = st.button("🚀 開始鑑價 (馬斯克毒舌版)")
-
-            if generate_btn:
-                # 檢查必要條件：至少要有車名 (不管是選的還是輸入的)
-                if not selected_car_info and not car_name_manual:
-                    st.error("❌ 請至少「選擇車款」或「手動輸入車款名稱」，不然 AI 不知道你在問什麼車！")
-                elif current_time - last_click_time < COOLDOWN_SECONDS:
-                    wait_time = int(COOLDOWN_SECONDS - (current_time - last_click_time))
-                    st.warning(f"❄️ 馬斯克還在喘... 請等 {wait_time} 秒")
+            
+            if st.button("🔥 開始毒舌分析"):
+                if current_time - last_click_time < COOLDOWN_SECONDS:
+                    st.warning(f"❄️ 馬斯克還在喘... 請等 {int(COOLDOWN_SECONDS - (current_time - last_click_time))} 秒")
                 else:
                     st.session_state['last_click_time'] = current_time
                     
-                    with st.spinner("🔮 正在進行隔空算命..."):
-                        # 呼叫 AI (傳入 None image 也可以)
-                        ai_data, error_status = get_analysis(api_key, image, price_input, selected_car_info, car_name_manual)
+                    final_car_name_display = ""
+                    final_price = 0.0
+                    
+                    with st.spinner("🤖 AI 正在閱讀你貼的文字..."):
+                        # 1. 執行智慧提取 (AI + 備用 Regex)
+                        if smart_text:
+                            extracted = extract_info_from_text(api_key, smart_text)
+                            if extracted:
+                                final_car_name_display = extracted.get("car_name", "")
+                                final_price = float(extracted.get("price", 0.0))
+                                if final_car_name_display:
+                                    st.success(f"✅ 讀取成功：{final_car_name_display} | ${final_price}萬")
                         
-                        if ai_data:
-                            st.markdown(f"<div class='fengshui-box'>🔮 <b>賽博風水分析：</b><br>{ai_data.get('feng_shui')}</div>", unsafe_allow_html=True)
+                        # 2. 手動輸入優先權最高
+                        if selected_option != "--- 未選擇 ---":
+                            final_car_name_display = selected_option
+                        elif manual_car_input:
+                            final_car_name_display = manual_car_input
+                        
+                        if manual_price_input > 0: final_price = manual_price_input
 
-                            st.markdown("### 💬 幫你寫好 LINE 訊息：")
-                            tab1, tab2 = st.tabs(["😇 禮貌試探版", "😎 老司機殺價版"])
-                            with tab1: st.code(ai_data.get('line_msg_polite'), language="text")
-                            with tab2: st.code(ai_data.get('line_msg_aggressive'), language="text")
+                    # 3. 搜尋庫存
+                    matched_row = None
+                    if not df.empty and final_car_name_display:
+                        matched_row = smart_search(df, final_car_name_display)
+                        if matched_row: st.info(f"📚 模糊匹配庫存：**{matched_row['車款名稱']}**")
+                        else: st.caption(f"⚠️ 資料庫無此車款，進行盲測。")
 
-                            report_card = create_report_card(image, ai_data, price_input, selected_car_info)
-                            st.image(report_card, caption="✅ 您的全方位戰情卡", use_column_width=True)
+                    # 4. 生成 (V34：即使價格是 0 也讓你過，AI 會用預設值)
+                    if not final_car_name_display:
+                        st.error("❌ 真的看不懂... 請在手動微調區輸入車名！")
+                    else:
+                        if final_price <= 0:
+                            st.warning("⚠️ 沒抓到價格，AI 將假設一個市場均價來分析。")
+                            final_price = 50.0 # 預設值，避免程式崩潰
                             
-                            buf = io.BytesIO()
-                            report_card.save(buf, format="PNG")
-                            st.download_button(label="📥 下載圖卡", data=buf.getvalue(), file_name="Musk_FengShui.png", mime="image/png")
-                        
-                        else:
-                            if error_status == "RATE_LIMIT": st.warning("🔥 系統過熱中，請排隊稍等 1 分鐘！")
-                            else: st.error(f"❌ 分析失敗：{error_status}")
+                        with st.spinner("🔮 馬斯克正在開噴..."):
+                            ai_data, error_status = get_analysis(api_key, image, final_price, matched_row, final_car_name_display)
+                            
+                            if ai_data:
+                                st.markdown(f"<div class='fengshui-box'>🔮 <b>賽博風水：</b>{ai_data.get('feng_shui')}</div>", unsafe_allow_html=True)
+                                
+                                tab1, tab2 = st.tabs(["😇 禮貌版", "😎 殺價版"])
+                                with tab1: st.code(ai_data.get('line_msg_polite'), language="text")
+                                with tab2: st.code(ai_data.get('line_msg_aggressive'), language="text")
+
+                                report_card = create_report_card(image, ai_data, final_price, matched_row)
+                                st.image(report_card, caption="✅ 戰情卡", use_column_width=True)
+                                
+                                buf = io.BytesIO()
+                                report_card.save(buf, format="PNG")
+                                st.download_button("📥 下載圖卡", buf.getvalue(), "Musk_Roast.png", "image/png")
+                            else:
+                                if error_status == "RATE_LIMIT": st.warning("🔥 系統過熱，請排隊！")
+                                else: st.error(f"❌ 失敗：{error_status}")
+
         elif not api_key:
             st.warning("👈 請輸入 API Key")
 
