@@ -6,9 +6,37 @@ import random
 import time
 
 # ==========================================
-# 0. 核心設定
+# 0. 核心設定 & 精選車庫 (每週從這裡改車)
 # ==========================================
 st.set_page_config(page_title="Brian's Auto Arbitrage | 拍場抄底神器", page_icon="🦅", layout="wide")
+
+# 🔥🔥🔥 Brian 的精選車庫 (每週二/四從這裡修改) 🔥🔥🔥
+FEATURED_CARS = [
+    {
+        "name": "2020 BENZ C300 AMG",
+        "market_price": 168,  # 市場行情 (萬)
+        "brian_price": 138,   # 你的代標預估價 (萬)
+        "tags": ["總代理", "跑少", "黑內裝"],
+        "desc": "本週最強標的。折舊已到底，氣氛燈/柏林之音滿配。這價格買到賺到。",
+        "status": "🔥 競標中"
+    },
+    {
+        "name": "2019 TOYOTA RAV4 油電",
+        "market_price": 85,
+        "brian_price": 68,
+        "tags": ["一手車", "原廠保養", "省油"],
+        "desc": "家庭用車首選。電池狀況極佳，里程僅 6 萬。閉著眼睛買都不會虧。",
+        "status": "⏳ 即將結標"
+    },
+    {
+        "name": "2016 MAZDA 3 頂級",
+        "market_price": 42,
+        "brian_price": 31,
+        "tags": ["魂動紅", "Bose音響", "無待修"],
+        "desc": "代步CP值之王。底盤紮實，外觀有 9 成新，新手練車最划算選擇。",
+        "status": "✨ 精選推薦"
+    }
+]
 
 st.markdown("""
     <style>
@@ -20,6 +48,28 @@ st.markdown("""
         border: 1px solid #e0e0e0; 
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         margin-bottom: 20px;
+    }
+    /* 精選金卡 */
+    .featured-card {
+        background: linear-gradient(135deg, #fff8e1 0%, #ffffff 100%);
+        padding: 20px;
+        border-radius: 12px;
+        border: 2px solid #ffb300;
+        box-shadow: 0 6px 12px rgba(255, 179, 0, 0.2);
+        margin-bottom: 25px;
+        position: relative;
+    }
+    .featured-badge {
+        position: absolute;
+        top: -12px;
+        right: 20px;
+        background-color: #d32f2f;
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-weight: bold;
+        font-size: 0.9em;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     .stButton>button { 
         width: 100%; 
@@ -42,6 +92,14 @@ st.markdown("""
         color: white;
         font-weight: bold;
         display: inline-block;
+    }
+    .tag-pill {
+        background-color: #e3f2fd;
+        color: #1565c0;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 0.8em;
+        margin-right: 5px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -83,7 +141,7 @@ def load_data():
     except Exception as e: return pd.DataFrame(), f"ERROR: {str(e)}"
 
 # ==========================================
-# 2. 推薦演算法 (競品優先 + 黑名單)
+# 2. 推薦演算法 (V42邏輯)
 # ==========================================
 def recommend_cars(df, budget_limit, usage, brand_pref):
     budget_max = budget_limit * 10000
@@ -118,7 +176,7 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
             elif any(x in name for x in ['TOYOTA', 'HONDA', 'NISSAN']): score -= 10 
         elif usage == "熱血操控樂趣":
             if any(x in name for x in ['BMW', 'FOCUS', 'GOLF', 'MAZDA', 'MX-5', '86', 'WRX', 'COOPER', 'MUSTANG', 'ST', 'GTI', 'SUPRA', 'GR', 'AURIS']): score += 50
-            if any(x in name for x in mpv_keywords): score -= 10000 
+            if any(x in name for x in mpv_keywords): score -= 10000
             if any(x in name for x in ['RAV4', 'CR-V', 'X-TRAIL']): score -= 500 
             if brand == "TOYOTA":
                 if any(x in name for x in toyota_sport): score += 20 
@@ -128,7 +186,6 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
         
         if brand_pref != "不限 (所有品牌)" and brand == brand_pref:
             score += 200 
-            
         return score
 
     candidates['match_score'] = candidates.apply(calculate_match_score, axis=1)
@@ -146,7 +203,6 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
     final_list = []
     selected_names = []
     
-    # 策略 A: 首選
     if brand_pref != "不限 (所有品牌)":
         preferred_cars = candidates[(candidates['Brand'] == brand_pref) & (candidates['match_score'] > 0)].sort_values(['match_score', '潛在省錢'], ascending=[False, False])
         if not preferred_cars.empty:
@@ -155,12 +211,7 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
             final_list.append(hero_car)
             selected_names.append(hero_car['車款名稱'])
             
-            # 策略 B: 強制競品
-            competitors_high = candidates[
-                (candidates['Brand'] != brand_pref) & 
-                (candidates['match_score'] > 0)
-            ].sort_values(['match_score', '潛在省錢'], ascending=[False, False])
-            
+            competitors_high = candidates[(candidates['Brand'] != brand_pref) & (candidates['match_score'] > 0)].sort_values(['match_score', '潛在省錢'], ascending=[False, False])
             for idx, row in competitors_high.iterrows():
                 if len(final_list) >= 3: break
                 row['Role'] = '⚔️ 強力競品'
@@ -168,17 +219,13 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
                 selected_names.append(row['車款名稱'])
             
             if len(final_list) < 3:
-                competitors_low = candidates[
-                    (candidates['Brand'] != brand_pref) & 
-                    (~candidates['車款名稱'].isin(selected_names))
-                ].sort_values('潛在省錢', ascending=False)
+                competitors_low = candidates[(candidates['Brand'] != brand_pref) & (~candidates['車款名稱'].isin(selected_names))].sort_values('潛在省錢', ascending=False)
                 for idx, row in competitors_low.iterrows():
                     if len(final_list) >= 3: break
                     row['Role'] = '⚖️ 跨界對比'
                     final_list.append(row)
                     selected_names.append(row['車款名稱'])
 
-    # 策略 C: 補位
     if len(final_list) < 3:
         remaining = candidates[~candidates['車款名稱'].isin(selected_names)].sort_values(['match_score', '潛在省錢'], ascending=[False, False])
         for idx, row in remaining.iterrows():
@@ -203,17 +250,14 @@ def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
     fallback_dict = {
         "luxury": [
             "這種車買的是『社交籌碼』。歷史數據顯示，此年份的折舊已趨緩，現在進場的資金利用率最高。",
-            "對於商務人士來說，這是極高 CP 值的門票。以這種成本取得豪華品牌，是極為聰明的資產配置。",
-            "這就是資訊落差的價值。你付的是國產車的價格，買到的是進口車的安全性與氣場。"
+            "對於商務人士來說，這是極高 CP 值的門票。以這種成本取得豪華品牌，是極為聰明的資產配置。"
         ],
         "economy": [
             "這是標準的『現金流守護者』。超低持有成本加上極高流通性，這筆交易在財務上絕對是正期望值。",
-            "拍場歷史行情顯示，這款車極少跌破此價格帶。現在入手，等於是買在安全邊際之上。",
-            "省下的價差足夠支付未來兩年的養車成本。別把錢浪費在不必要的溢價上。"
+            "拍場歷史行情顯示，這款車極少跌破此價格帶。現在入手，等於是買在安全邊際之上。"
         ],
         "fun": [
             "用這種成本買到這種樂趣，是男人最划算的玩具投資。歷史成交紀錄顯示此類車款極為搶手。",
-            "這種性能車款流通性好，現在依照行情抄底，玩個兩年再賣掉，折舊損失微乎其微。",
             "這台車的『樂趣/價格比』極高。建議鎖定這類標的，享受駕駛樂趣又不傷荷包。"
         ]
     }
@@ -237,7 +281,7 @@ def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
         return random.choice(fallback_dict[car_type])
 
 # ==========================================
-# 4. 主程式 UI (V44：歷史行情見證版)
+# 4. 主程式 UI (V45：首頁精選櫥窗版)
 # ==========================================
 def main():
     with st.sidebar:
@@ -249,15 +293,43 @@ def main():
             api_key = st.text_input("Google API Key", type="password")
         
         st.info("💡 **拍場抄底原理**\n我們直接掃描全台批發拍場庫存，跳過車商利潤，讓你用接近車行的成本入手好車。")
-        st.caption("V44 (Historical Proof)")
+        st.caption("V45 (Featured Drops)")
 
     st.title("🦅 Brian's Auto Arbitrage | 拍場抄底神器")
-    st.markdown("""
-    > **「買車不該是消費，而是一場精計算的資產配置。」**
-    > AI 將鎖定一台 **首選推薦**，並尋找兩台 **強力競品** 進行殘酷的價格對決。
-    """)
-    st.markdown("---")
+    
+    # === 🔥 本週精選櫥窗 (Featured Section) ===
+    st.markdown("### 🔥 本週精選 (Weekly Drops)")
+    st.markdown("Brian 嚴選拍場現貨，低於行情釋出。**不用算，直接買。**")
+    
+    # 使用 3 列顯示精選車
+    f_cols = st.columns(3)
+    for i, car in enumerate(FEATURED_CARS):
+        with f_cols[i]:
+            st.markdown(f"""<div class='featured-card'>
+                <div class='featured-badge'>{car['status']}</div>
+                <h3>{car['name']}</h3>
+                <div style='color:#757575; font-size:0.9em; text-decoration: line-through;'>市價: {car['market_price']} 萬</div>
+                <div style='color:#d32f2f; font-size:1.5em; font-weight:bold;'>Brian價: {car['brian_price']} 萬</div>
+                <div style='margin-top:10px;'>
+            """, unsafe_allow_html=True)
+            
+            # 標籤
+            for tag in car['tags']:
+                st.markdown(f"<span class='tag-pill'>{tag}</span>", unsafe_allow_html=True)
+            
+            st.markdown(f"""
+                </div>
+                <p style='margin-top:10px; font-size:0.9em;'>{car['desc']}</p>
+                <br>
+                <a href='https://line.me/ti/p/你的ID' target='_blank' style='display:block; text-align:center; background:#1565c0; color:white; padding:10px; border-radius:5px; text-decoration:none; font-weight:bold;'>🙋‍♂️ 我要這台</a>
+            </div>
+            """, unsafe_allow_html=True)
 
+    st.markdown("---")
+    
+    # === 下方為 AI 搜尋器 (Search Engine) ===
+    st.markdown("### 🔎 找不到喜歡的？讓 AI 幫你掃描全台庫存")
+    
     df, status = load_data()
     
     if status == "SUCCESS" and not df.empty:
@@ -323,14 +395,13 @@ def main():
                         
                         st.markdown("---")
                         
-                        # === V44 修改：歷史行情見證 ===
+                        # History Proof
                         f1, f2 = st.columns([3, 2])
                         with f1:
                             st.caption(f"📉 若在車行購買，預計資產縮水: ${int(savings*0.8/10000)} 萬")
                             st.caption(f"📅 數據來源: 近期拍場成交紀錄 (非即時)")
                         
                         with f2:
-                            # 鎖住的內容：歷史成交證明
                             with st.expander("🔒 查看歷史成交見證"):
                                 st.info("此為真實成交紀錄，證明低價是存在的。")
                                 st.markdown("""
@@ -342,10 +413,7 @@ def main():
                                 """, unsafe_allow_html=True)
                                 
                                 st.button(f"💳 解鎖成交紀錄 ($99)", key=f"pay_{i}")
-                                
                                 st.markdown("---")
-                                st.markdown("**想收到每週二/四精選好車？**")
-                                # ▼▼▼ 請記得換成你的 Line 連結 ▼▼▼
                                 st.markdown(f"[👉 Line: 加入 Brian 精選群](https://line.me/ti/p/你的ID)")
 
                         st.markdown("</div>", unsafe_allow_html=True)
