@@ -12,7 +12,7 @@ import time
 # ==========================================
 # 0. 核心設定
 # ==========================================
-st.set_page_config(page_title="Brian AI 戰情室 (V30-智慧輸入版)", page_icon="🦅", layout="centered")
+st.set_page_config(page_title="Brian AI 戰情室 (V31-強力搜尋版)", page_icon="🦅", layout="centered")
 
 # --- 字型設定 ---
 FONT_PATH_BOLD = "msjhbd.ttc" 
@@ -46,7 +46,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 資料庫讀取
+# 1. 資料庫與搜尋引擎 (V31 重大升級)
 # ==========================================
 @st.cache_data
 def load_data():
@@ -57,8 +57,40 @@ def load_data():
         if df.empty: return pd.DataFrame(), "EMPTY"
         if '成本底價' in df.columns:
              df['成本底價'] = df['成本底價'].astype(str).str.replace(',', '').str.replace('$', '').astype(float).astype(int)
+        # 轉成字串方便搜尋
+        df['車款名稱'] = df['車款名稱'].astype(str)
         return df, "SUCCESS"
     except Exception as e: return pd.DataFrame(), f"ERROR: {str(e)}"
+
+# --- V31 新增：智慧關鍵字搜尋引擎 ---
+def smart_search(df, query):
+    if df.empty or not query: return None
+    
+    # 1. 把使用者的搜尋字串切碎 (例如 "2012 BMW 320i" -> ["2012", "bmw", "320i"])
+    keywords = str(query).lower().split()
+    
+    # 2. 定義計分函式：算算看每一行對中幾個字
+    def calculate_score(row_name):
+        row_name = row_name.lower()
+        score = 0
+        for k in keywords:
+            if k in row_name:
+                score += 1
+        return score
+
+    # 3. 幫整個資料庫打分數
+    # (copy以免影響原始資料)
+    search_df = df.copy()
+    search_df['score'] = search_df['車款名稱'].apply(calculate_score)
+    
+    # 4. 找出分數最高的 (至少要對中 1 個字)
+    best_matches = search_df[search_df['score'] > 0].sort_values('score', ascending=False)
+    
+    if not best_matches.empty:
+        # 回傳第一名
+        return best_matches.iloc[0].to_dict()
+    else:
+        return None
 
 def get_best_model(api_key):
     genai.configure(api_key=api_key)
@@ -74,20 +106,20 @@ def get_best_model(api_key):
 # 2. AI 核心功能
 # ==========================================
 
-# --- 新增功能：從雜亂文字中提取車型與價格 ---
 def extract_info_from_text(api_key, raw_text):
     target_model = get_best_model(api_key)
     if not target_model: return None
     
     prompt = f"""
-    你是資料提取機器人。使用者會輸入一段關於賣車的文字（可能是標題、貼文、或對話）。
-    請從中提取：
-    1. "car_name": 車款名稱 (盡量完整，例如 '2016 Toyota Altis')
-    2. "price": 價格 (單位換算為『萬』，純數字。例如 358000 請轉為 35.8。如果沒寫價格，回傳 0)
+    你是資料提取機器人。使用者會輸入一段關於賣車的文字。
+    請提取：
+    1. "car_name": 車款關鍵字 (例如 'BMW 320i' 或 'Toyota Altis'，請去除年份和形容詞，只留核心車型以便搜尋)
+    2. "full_name_with_year": 完整車名含年份 (例如 '2012 BMW 320i')
+    3. "price": 價格 (單位換算為『萬』，純數字。例如 358000 請轉為 35.8)
     
     使用者輸入：{raw_text}
     
-    請回傳純 JSON 格式：{{"car_name": "...", "price": 0.0}}
+    請回傳純 JSON 格式：{{"car_name": "...", "full_name_with_year": "...", "price": 0.0}}
     """
     try:
         model = genai.GenerativeModel(target_model)
@@ -97,26 +129,24 @@ def extract_info_from_text(api_key, raw_text):
     except:
         return None
 
-# --- 原本的分析核心 ---
 def get_analysis(api_key, image, user_price, car_info, manual_car_name=None):
     target_model = get_best_model(api_key)
     if not target_model: return None, "找不到可用模型"
 
-    # 數據與情境準備
     if car_info:
         name = car_info.get('車款名稱', '未知')
         cost = car_info.get('成本底價', 0)
         margin = int(user_price * 10000) - cost
-        db_context = f"數據庫匹配：{name}，底價${cost}，賣家開價${int(user_price*10000)}，價差${margin}。"
+        db_context = f"數據庫精準匹配：{name}，行情底價約${cost}，賣家開價${int(user_price*10000)}，價差${margin}。"
     else:
         name = manual_car_name if manual_car_name else "未知車款"
-        db_context = f"使用者輸入車款：{name}，開價${user_price}萬 (無數據庫底價參考)。"
+        db_context = f"使用者輸入車款：{name}，開價${user_price}萬 (資料庫無此車數據，請依市價盲測)。"
 
     if image:
         image_context = "請根據『上傳的照片』進行外觀與車況的毒舌分析。"
         input_content = [image]
     else:
-        image_context = f"使用者【沒有上傳照片】，請你發揮想像力，假設這是一台市面上常見的 {name} 中古車。請根據它的價格和車型進行『盲測毒舌』。"
+        image_context = f"使用者【沒有上傳照片】，請發揮想像力，假設這是一台 {name} 中古車。請根據價格和車型進行『盲測毒舌』。"
         input_content = []
 
     prompt = f"""
@@ -230,13 +260,12 @@ def main():
             st.success("✅ API 金鑰已啟用")
         else:
             api_key = st.text_input("Google API Key", type="password")
-        st.caption("V30 (智慧輸入版)")
+        st.caption("V31 (強力搜尋版)")
 
     st.title("🦅 拍賣場 AI 戰情室")
     df, status = load_data()
-    selected_car_info = None
 
-    # === Mode A: 抽籤 (保持不變) ===
+    # === Mode A: 抽籤 ===
     if mode == "AI 幫我抽 (懶人)":
         st.markdown("<div class='god-mode-box'><b>🎲 AI 靈籤模式：</b><br>不知道買什麼？輸入預算，讓 AI 幫你決定命運。</div>", unsafe_allow_html=True)
         col_a, col_b = st.columns(2)
@@ -255,30 +284,24 @@ def main():
                 else: st.error("❌ 預算太低了... 買不到車！")
             except: st.error("抽籤失敗")
 
-    # === Mode B: 智慧搜尋 (大幅改版) ===
+    # === Mode B: 智慧搜尋 (強力升級) ===
     else:
         st.markdown("### 🚀 智慧輸入 (貼上文字即可)")
         
-        # 1. 智慧輸入框
-        smart_text = st.text_area("📋 直接貼上 8891 標題、FB 貼文、或朋友的訊息 (AI 會自己讀)", height=100, placeholder="例如：售 2015 Mazda 3 頂級款 里程8萬 只要35.8萬 誠可議")
+        smart_text = st.text_area("📋 直接貼上 8891 標題、FB 貼文、或朋友的訊息 (AI 會自己讀)", height=100, placeholder="例如：售 2012 BMW 320i 里程8萬 只要42.8萬 誠可議")
         
-        # 2. 手動微調區 (預設收合)
-        with st.expander("🛠️ 手動微調 (如果 AI 讀錯請點這)", expanded=False):
+        with st.expander("🛠️ 手動微調 (AI 讀錯請點這)", expanded=False):
             # 優先搜尋資料庫
             car_options = ["--- 未選擇 ---"] + (df['車款名稱'].astype(str).tolist() if not df.empty else [])
             selected_option = st.selectbox("資料庫匹配:", car_options)
             
-            # 手動輸入
             manual_car_input = st.text_input("或手動輸入車型:", value="")
             manual_price_input = st.number_input("價格 (萬):", 0.0, 1000.0, 0.0, step=0.5)
 
-        # 3. 照片上傳 (選填)
         uploaded_file = st.file_uploader("📸 上傳截圖/照片 (選填，有圖更準)", type=['jpg', 'png', 'jpeg'])
         image = Image.open(uploaded_file) if uploaded_file else None
 
-        # 4. 執行邏輯
         if api_key:
-            # 防手賤冷卻
             current_time = time.time()
             last_click_time = st.session_state.get('last_click_time', 0)
             COOLDOWN_SECONDS = 10
@@ -289,47 +312,54 @@ def main():
                 else:
                     st.session_state['last_click_time'] = current_time
                     
-                    # --- 階段一：解析資料 ---
-                    final_car_name = ""
+                    final_car_name_display = ""
                     final_price = 0.0
                     
                     with st.spinner("🤖 AI 正在閱讀你貼的文字..."):
-                        # 如果有智慧文字，先解析
+                        extracted_name_for_search = ""
+                        
+                        # 1. AI 讀取文字
                         if smart_text:
                             extracted = extract_info_from_text(api_key, smart_text)
                             if extracted:
-                                final_car_name = extracted.get("car_name", "")
+                                # car_name 用來搜尋 (例如 "BMW 320i")
+                                extracted_name_for_search = extracted.get("car_name", "")
+                                # full_name 用來顯示 (例如 "2012 BMW 320i")
+                                final_car_name_display = extracted.get("full_name_with_year", extracted_name_for_search)
                                 final_price = float(extracted.get("price", 0.0))
-                                st.success(f"✅ AI 讀取到：{final_car_name} | ${final_price}萬")
+                                
+                                st.success(f"✅ AI 讀取到：{final_car_name_display} | ${final_price}萬")
                         
-                        # 如果手動輸入區有值，覆蓋 AI 的判斷 (User override)
+                        # 2. 手動覆蓋
                         if selected_option != "--- 未選擇 ---":
-                            final_car_name = selected_option
+                            extracted_name_for_search = selected_option
+                            final_car_name_display = selected_option
                         elif manual_car_input:
-                            final_car_name = manual_car_input
+                            extracted_name_for_search = manual_car_input
+                            final_car_name_display = manual_car_input
                             
                         if manual_price_input > 0:
                             final_price = manual_price_input
 
-                    # --- 階段二：嘗試匹配資料庫底價 ---
+                    # 3. 智慧搜尋 (V31 核心：關鍵字計分)
                     matched_row = None
-                    if not df.empty and final_car_name:
-                        # 簡單模糊比對 (如果資料庫有這個名字)
-                        matches = df[df['車款名稱'].astype(str).str.contains(final_car_name, case=False, na=False)]
-                        if not matches.empty:
-                            matched_row = matches.iloc[0].to_dict()
-                            st.info(f"📚 成功匹配庫存數據：{matched_row['車款名稱']} (底價參考中)")
+                    if not df.empty and extracted_name_for_search:
+                        # 使用 smart_search 函式
+                        matched_row = smart_search(df, extracted_name_for_search)
+                        
+                        if matched_row:
+                            st.info(f"📚 成功模糊匹配庫存：**{matched_row['車款名稱']}** (關鍵字命中)")
                         else:
-                            st.caption(f"⚠️ 無法在資料庫找到 '{final_car_name}'，將進行盲測模式。")
+                            st.caption(f"⚠️ 資料庫無 '{extracted_name_for_search}' 相關車款，將進行盲測。")
 
-                    # --- 階段三：生成報告 ---
-                    if not final_car_name:
+                    # 4. 生成報告
+                    if not final_car_name_display:
                         st.error("❌ AI 看不懂你貼了什麼，請手動輸入車名！")
                     elif final_price <= 0:
                         st.error("❌ 沒抓到價格？請手動補上價格！")
                     else:
                         with st.spinner("🔮 馬斯克正在開噴..."):
-                            ai_data, error_status = get_analysis(api_key, image, final_price, matched_row, final_car_name)
+                            ai_data, error_status = get_analysis(api_key, image, final_price, matched_row, final_car_name_display)
                             
                             if ai_data:
                                 st.markdown(f"<div class='fengshui-box'>🔮 <b>賽博風水：</b>{ai_data.get('feng_shui')}</div>", unsafe_allow_html=True)
@@ -353,4 +383,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
