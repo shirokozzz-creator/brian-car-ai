@@ -14,8 +14,8 @@ import random
 st.set_page_config(page_title="Brian AI 戰情室 (V23-收割版)", page_icon="🦅", layout="centered")
 
 # --- 字型設定 ---
-FONT_PATH_BOLD = "C:\\Windows\\Fonts\\msjhbd.ttc" 
-FONT_PATH_REG = "C:\\Windows\\Fonts\\msjh.ttc"    
+FONT_PATH_BOLD = "msjhbd.ttc" 
+FONT_PATH_REG = "msjh.ttc"
 
 try:
     title_font = ImageFont.truetype(FONT_PATH_BOLD, 40)
@@ -246,4 +246,5 @@ def main():
         st.warning("👈 請輸入 API Key")
 
 if __name__ == "__main__":
+
     main()
