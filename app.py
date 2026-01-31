@@ -203,7 +203,7 @@ def main():
             row = df[df['車款名稱'] == selected_option].iloc[0]
             selected_car_info = row.to_dict()
             cost = row['成本底價']
-            st.info(f"🎯 鎖定：{row['車款名稱']} | 📜 底價：${cost:,}")
+            st.info(f"🎯 鎖定：{row['車款名稱']} | 📜 行情數據庫：✅ 已連線 (請上傳照片進行分析)")
     else:
         if status == "MISSING": st.warning("⚠️ 進入純 AI 模式 (無庫存比對)")
         
@@ -254,5 +254,6 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
