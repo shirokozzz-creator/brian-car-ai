@@ -88,7 +88,7 @@ def get_analysis(api_key, image, user_price, car_info):
     請回傳純 JSON (繁體中文)：
     - "car_model": "車型",
     - "sucker_score": 0-100 (盤子指數),
-    - "margin_analysis": "價差短評 (如: 合理管銷/暴利收割)",
+    - "margin_analysis": "價差短評 (請嚴格控制在 6 個字以內，例如：暴利收割、合理行情、佛心賣家)",
     - "verdict_short": "決策 (BUY IT / NEGOTIATE / RUN)",
     - "musk_comment": "馬斯克毒舌短評 (約 50 字)",
     - "feng_shui": "請根據車色或外型，瞎掰一個『賽博風水運勢』。例如：黑色屬水帶財，適合工程師；或是紅色煞氣重，小心罰單。(約30字)",
@@ -248,3 +248,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
