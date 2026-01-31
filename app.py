@@ -7,12 +7,12 @@ import io
 import textwrap
 import json
 import random
-import time  # 引入時間模組，用於計算冷卻時間
+import time
 
 # ==========================================
 # 0. 核心設定
 # ==========================================
-st.set_page_config(page_title="Brian AI 戰情室 (V25-防禦版)", page_icon="🦅", layout="centered")
+st.set_page_config(page_title="Brian AI 戰情室 (V27-防重疊版)", page_icon="🦅", layout="centered")
 
 # --- 字型設定 ---
 FONT_PATH_BOLD = "msjhbd.ttc" 
@@ -74,7 +74,7 @@ def get_best_model(api_key):
     except: return None
 
 # ==========================================
-# 2. AI 核心 (含防爆機制)
+# 2. AI 核心
 # ==========================================
 def get_analysis(api_key, image, user_price, car_info):
     target_model = get_best_model(api_key)
@@ -110,15 +110,16 @@ def get_analysis(api_key, image, user_price, car_info):
         return json.loads(txt), target_model
     except Exception as e:
         error_msg = str(e)
-        if "429" in error_msg: # 攔截額度不足錯誤
+        if "429" in error_msg: 
             return None, "RATE_LIMIT"
         return None, error_msg
 
 # ==========================================
-# 3. 圖片生成引擎
+# 3. 圖片生成引擎 (V27：超級加寬版)
 # ==========================================
 def create_report_card(car_image, ai_data, user_price, car_info):
-    W, H = 850, 1250 
+    # 1. 畫布拉長到 1400，空間給好給滿
+    W, H = 850, 1400 
     bg_color = (25, 20, 35)
     card = Image.new('RGB', (W, H), bg_color)
     draw = ImageDraw.Draw(card)
@@ -129,7 +130,7 @@ def create_report_card(car_image, ai_data, user_price, car_info):
     draw.text((20, 25), "BRIAN AI | 智能戰情室 X 運勢分析", font=title_font, fill=(255, 0, 255))
     draw.line((20, 80, 830, 80), fill=(255, 0, 255), width=3)
 
-    # 數據區
+    # --- 第一層：數據區 (Y=630) ---
     score = ai_data.get('sucker_score', 50)
     score_color = (255, 50, 50) if score > 70 else (0, 255, 0)
     draw.text((40, 630), "盤子指數", font=text_font, fill=(200, 200, 200))
@@ -146,38 +147,47 @@ def create_report_card(car_image, ai_data, user_price, car_info):
     draw.text((620, 630), "賣家開價", font=text_font, fill=(200, 200, 200))
     draw.text((620, 675), f"${user_price}萬", font=subtitle_font, fill=(255, 255, 255))
 
-    # 顯示真實底價 (僅在圖片中揭露)
+    # --- 關鍵修正區：底價顯示 (Y=740) ---
     if car_info and '成本底價' in car_info:
         wholesale_val = car_info['成本底價'] / 10000 
-        draw.text((620, 740), "AI 估算底價", font=text_font, fill=(200, 200, 200))
-        draw.text((620, 775), f"${wholesale_val}萬", font=subtitle_font, fill=(0, 255, 0))
+        draw.text((620, 740), "AI 估算底價", font=text_font, fill=(150, 150, 150))
+        draw.text((620, 775), f"${wholesale_val}萬", font=subtitle_font, fill=(0, 255, 100)) # 綠色
 
+    # --- 第二層：馬斯克評語 (大幅下移至 Y=860，完全避開上面) ---
+    # 之前是 780 或 830，現在直接推到 860，保證不撞車
+    START_Y_MUSK = 860
+    
     verdict = ai_data.get('verdict_short', 'N/A').upper()
     verdict_color = (255, 50, 50) if "RUN" in verdict else (0, 255, 0)
-    draw.rectangle((40, 780, 320, 850), outline=verdict_color, width=4)
-    draw.text((60, 795), verdict, font=title_font, fill=verdict_color)
+    
+    # 決策印章
+    draw.rectangle((40, START_Y_MUSK, 320, START_Y_MUSK + 70), outline=verdict_color, width=4)
+    draw.text((60, START_Y_MUSK + 15), verdict, font=title_font, fill=verdict_color)
 
+    # 評語文字
     comment = ai_data.get('musk_comment', '...')
     x_comment = 360
     lines = textwrap.wrap(comment, width=23) 
-    y_text = 780
+    y_text = START_Y_MUSK 
     draw.text((x_comment, y_text-30), "Elon's Verdict:", font=small_font, fill=(255, 0, 255))
     for line in lines:
         draw.text((x_comment, y_text), line, font=comment_font, fill=(230, 230, 230))
         y_text += 30
 
-    draw.line((20, 950, 830, 950), fill=(100, 100, 100), width=1)
+    # --- 第三層：風水分析 (下移至 Y=1150) ---
+    START_Y_FENGSHUI = 1150
+    draw.line((20, START_Y_FENGSHUI - 20, 830, START_Y_FENGSHUI - 20), fill=(100, 100, 100), width=1)
     
     feng_shui = ai_data.get('feng_shui', '分析中...')
-    draw.text((20, 970), "🔮 Cyber Feng Shui (賽博風水)", font=subtitle_font, fill=(255, 215, 0))
+    draw.text((20, START_Y_FENGSHUI), "🔮 Cyber Feng Shui (賽博風水)", font=subtitle_font, fill=(255, 215, 0))
     
     fs_lines = textwrap.wrap(feng_shui, width=32)
-    y_fs = 1020
+    y_fs = START_Y_FENGSHUI + 50
     for line in fs_lines:
         draw.text((40, y_fs), line, font=text_font, fill=(255, 255, 200))
         y_fs += 35
 
-    draw.text((20, 1200), "Powered by Brian's AI | 買車看數據，也看天意", font=small_font, fill=(100, 100, 100))
+    draw.text((20, 1350), "Powered by Brian's AI | 買車看數據，也看天意", font=small_font, fill=(100, 100, 100))
     return card
 
 # ==========================================
@@ -189,14 +199,13 @@ def main():
         mode = st.radio("🤔 選擇模式：", ["自行搜尋 (老手)", "AI 幫我抽 (懶人)"])
         st.markdown("---")
 
-        # 簡單的單一 Key 讀取 (因為你已經換新 Key 了)
         if "GOOGLE_API_KEY" in st.secrets:
             api_key = st.secrets["GOOGLE_API_KEY"]
             st.success("✅ API 金鑰已啟用")
         else:
             api_key = st.text_input("Google API Key", type="password")
             
-        st.caption("V25 (防手賤版)")
+        st.caption("V27 (加寬版)")
 
     st.title("🦅 拍賣場 AI 戰情室")
 
@@ -265,20 +274,18 @@ def main():
             image = Image.open(uploaded_file)
             st.image(image, caption='待鑑價車輛', width=300)
             
-            # --- V25 更新：防手賤冷卻機制 (Cooldown) ---
+            # --- V25 防手賤冷卻機制 ---
             current_time = time.time()
             last_click_time = st.session_state.get('last_click_time', 0)
-            COOLDOWN_SECONDS = 15 # 設定冷卻時間 15 秒
+            COOLDOWN_SECONDS = 15 
 
             generate_btn = st.button("🚀 生成全方位鑑價報告")
 
             if generate_btn:
-                # 檢查冷卻時間
                 if current_time - last_click_time < COOLDOWN_SECONDS:
                     wait_time = int(COOLDOWN_SECONDS - (current_time - last_click_time))
                     st.warning(f"❄️ 技能冷卻中！馬斯克罵人很累，請等待 {wait_time} 秒後再試...")
                 else:
-                    # 更新點擊時間
                     st.session_state['last_click_time'] = current_time
                     
                     with st.spinner("🔮 馬斯克正在計算盤子指數 & 觀看星象..."):
