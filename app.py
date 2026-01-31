@@ -126,7 +126,13 @@ def create_report_card(car_image, ai_data, user_price, car_info):
 
     margin_text = ai_data.get('margin_analysis', '分析中')
     draw.text((360, 630), "利潤結構", font=text_font, fill=(200, 200, 200))
-    draw.text((360, 675), margin_text, font=subtitle_font, fill=(255, 255, 255))
+    
+    # 強制限制寬度，每 10 個字換一行
+    margin_lines = textwrap.wrap(margin_text, width=10) 
+    y_margin = 675
+    for line in margin_lines:
+        draw.text((360, y_margin), line, font=subtitle_font, fill=(255, 255, 255))
+        y_margin += 35 # 行距
     
     draw.text((620, 630), "賣家開價", font=text_font, fill=(200, 200, 200))
     draw.text((620, 675), f"${user_price}萬", font=subtitle_font, fill=(255, 255, 255))
@@ -248,4 +254,5 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
