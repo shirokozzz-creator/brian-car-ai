@@ -13,7 +13,7 @@ import re
 # ==========================================
 # 0. 核心設定
 # ==========================================
-st.set_page_config(page_title="Brian AI 戰情室 (V32-穩定版)", page_icon="🦅", layout="centered")
+st.set_page_config(page_title="Brian AI 戰情室 (V33-暴力解析版)", page_icon="🦅", layout="centered")
 
 # --- 字型設定 ---
 FONT_PATH_BOLD = "msjhbd.ttc" 
@@ -88,7 +88,7 @@ def get_best_model(api_key):
     except: return None
 
 # ==========================================
-# 2. AI 核心功能 (V32：強化 JSON 解析)
+# 2. AI 核心功能 (V33：Regex 暴力解析)
 # ==========================================
 
 def extract_info_from_text(api_key, raw_text):
@@ -96,21 +96,39 @@ def extract_info_from_text(api_key, raw_text):
     if not target_model: return None
     
     prompt = f"""
-    You are a data extraction assistant. Extract car information from the text.
-    Text: {raw_text}
+    Extract car info from: "{raw_text}"
     
-    Return JSON with these keys:
-    - "car_name": The car model keywords (e.g., 'BMW 320i', 'Toyota Altis'). Remove year if possible.
-    - "full_name_with_year": The full name with year (e.g., '2012 BMW 320i').
-    - "price": The price in numeric format (unit: 10k TWD). e.g., "35.8萬" -> 35.8. If no price is found, return 0.
+    Return purely JSON format (no markdown):
+    {{
+        "car_name": "keywords only (e.g. BMW 320i)",
+        "full_name_with_year": "full name (e.g. 2012 BMW 320i)",
+        "price": price_in_numbers (e.g. 72.9)
+    }}
     """
     try:
-        # V32 重點：強制使用 JSON 模式
-        generation_config = {"response_mime_type": "application/json"}
-        model = genai.GenerativeModel(target_model, generation_config=generation_config)
-        
+        model = genai.GenerativeModel(target_model)
         response = model.generate_content(prompt)
-        return json.loads(response.text)
+        txt = response.text
+        
+        # --- V33 暴力解析核心 ---
+        # 1. 先嘗試標準 JSON 清洗
+        clean_txt = txt.strip().replace('```json', '').replace('```', '')
+        try:
+            return json.loads(clean_txt)
+        except:
+            pass # 失敗了別怕，繼續往下試
+            
+        # 2. 使用 Regex 尋找 { ... } 區塊
+        match = re.search(r'\{.*\}', txt, re.DOTALL)
+        if match:
+            json_str = match.group(0)
+            try:
+                return json.loads(json_str)
+            except:
+                pass
+                
+        # 3. 真的都失敗了，回傳 None
+        return None
     except:
         return None
 
@@ -153,12 +171,21 @@ def get_analysis(api_key, image, user_price, car_info, manual_car_name=None):
     input_content.insert(0, prompt)
 
     try:
-        # 這裡也加上 JSON 強制模式，確保不會壞掉
-        generation_config = {"response_mime_type": "application/json"}
-        model = genai.GenerativeModel(target_model, generation_config=generation_config)
-        
+        model = genai.GenerativeModel(target_model)
         response = model.generate_content(input_content)
-        return json.loads(response.text), target_model
+        
+        # 同樣使用暴力解析
+        txt = response.text
+        clean_txt = txt.strip().replace('```json', '').replace('```', '')
+        try:
+            return json.loads(clean_txt), target_model
+        except:
+             match = re.search(r'\{.*\}', txt, re.DOTALL)
+             if match:
+                 return json.loads(match.group(0)), target_model
+             else:
+                 return None, "JSON_PARSE_ERROR"
+
     except Exception as e:
         error_msg = str(e)
         if "429" in error_msg: return None, "RATE_LIMIT"
@@ -241,7 +268,7 @@ def main():
             st.success("✅ API 金鑰已啟用")
         else:
             api_key = st.text_input("Google API Key", type="password")
-        st.caption("V32 (穩定版)")
+        st.caption("V33 (暴力解析版)")
 
     st.title("🦅 拍賣場 AI 戰情室")
     df, status = load_data()
@@ -319,11 +346,11 @@ def main():
                         if matched_row: st.info(f"📚 成功模糊匹配庫存：**{matched_row['車款名稱']}** (關鍵字命中)")
                         else: st.caption(f"⚠️ 資料庫無 '{extracted_name_for_search}' 相關車款，將進行盲測。")
 
-                    # V32 優化：價格為 0 時不報錯，而是提示
+                    # V33 修正：價格容錯
                     if not final_car_name_display:
                         st.error("❌ AI 真的看不懂... 請在下方『手動微調』區輸入車名！")
                     elif final_price <= 0:
-                        st.warning("⚠️ AI 讀到了車名，但**沒看到價格**。請在『手動微調』區補上價格，然後再按一次按鈕！")
+                        st.warning("⚠️ AI 讀到了車名，但沒抓到價格。請在『手動微調』區補上價格再按一次！")
                     else:
                         with st.spinner("🔮 馬斯克正在開噴..."):
                             ai_data, error_status = get_analysis(api_key, image, final_price, matched_row, final_car_name_display)
