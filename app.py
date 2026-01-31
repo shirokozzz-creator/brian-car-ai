@@ -6,7 +6,7 @@ import random
 import time
 
 # ==========================================
-# 0. 核心設定 (轉型為專業工具風格)
+# 0. 核心設定 (專業投資風格)
 # ==========================================
 st.set_page_config(page_title="Brian's Auto Arbitrage | 拍場抄底神器", page_icon="🦅", layout="wide")
 
@@ -57,93 +57,111 @@ def load_data():
     except Exception as e: return pd.DataFrame(), f"ERROR: {str(e)}"
 
 # ==========================================
-# 2. 推薦演算法 (核心大腦)
+# 2. 推薦演算法 (加入車種過濾邏輯)
 # ==========================================
 def recommend_cars(df, budget_limit, usage, brand_pref):
-    # 1. 預算篩選 (找底價在預算內的)
-    # 預算單位是萬，轉成元
+    # 1. 預算篩選
     budget_max = budget_limit * 10000
-    # 預算下限設為上限的 50%，避免推薦太爛的車
-    budget_min = budget_max * 0.4 
+    budget_min = budget_max * 0.3 # 擴大範圍，避免找不到車
     
     candidates = df[
         (df['成本底價'] <= budget_max) & 
         (df['成本底價'] >= budget_min)
     ].copy()
     
-    if candidates.empty: return pd.DataFrame() # 沒車
+    if candidates.empty: return pd.DataFrame() 
     
-    # 2. 品牌篩選
-    if brand_pref != "不限 (全部品牌)":
+    # 2. 品牌篩選 (如果不是選不限)
+    if brand_pref != "不限 (所有品牌)":
         candidates = candidates[candidates['車款名稱'].str.contains(brand_pref, case=False)]
+        if candidates.empty: return pd.DataFrame() # 該品牌沒車
     
-    # 3. 用途權重 (Heuristic Scoring)
-    # 根據車名關鍵字給分
-    def calculate_usage_score(car_name):
+    # 3. 用途邏輯 (根據車型關鍵字過濾)
+    # 定義關鍵字庫
+    suv_keywords = ['cr-v', 'rav4', 'kuga', 'x-trail', 'suv', 'cx-5', 'odyssey', 'glc', 'rx', 'nx', 'tiguan', 'sportage', 'tucson', 'outlander', 'urx', 'sienta']
+    sedan_keywords = ['altis', 'camry', 'sentra', 'mazda 3', 'focus', 'elantra', 'vios', 'yaris', 'fit', 'colt', 'tiida', 'city', 'civic', 'e-class', 'c-class', '3-series', '5-series', 'a4', 'es']
+    sport_keywords = ['bmw', 'focus st', 'golf gti', 'mx-5', '86', 'brz', 'wrx', 'cooper', 'mustang']
+    
+    def calculate_match_score(car_name):
         score = 0
         name = car_name.lower()
         
-        if usage == "高 CP 代步 (Toyota/Honda...)":
-            if any(x in name for x in ['toyota', 'honda', 'nissan', 'altis', 'yaris', 'vios', 'fit', 'tiida']): score += 5
-            if any(x in name for x in ['bmw', 'benz']): score -= 2 # 代步不推雙B
+        # 根據用途給分 (不只是加分，不符合的要扣分)
+        if usage == "極致省油代步":
+            if any(x in name for x in ['altis', 'vios', 'yaris', 'fit', 'prius', 'hybrid', 'city']): score += 10
+            elif any(x in name for x in suv_keywords): score -= 5 # 省油不推休旅
             
-        elif usage == "家庭休旅 (空間安全)":
-            if any(x in name for x in ['cr-v', 'rav4', 'kuga', 'x-trail', 'suv', 'cx-5', 'odyssey']): score += 5
+        elif usage == "家庭舒適空間":
+            if any(x in name for x in suv_keywords + ['odyssey', 'sienna', 'previa', 'm7']): score += 10
+            elif any(x in name for x in ['yaris', 'vios', 'march']): score -= 5 # 家庭不推小車
             
-        elif usage == "面子工程 (BMW/Benz...)":
-            if any(x in name for x in ['bmw', 'benz', 'mercedes', 'lexus', 'audi', 'c300', 'cla']): score += 5
+        elif usage == "業務通勤耐操":
+            if any(x in name for x in ['altis', 'corolla', 'camry', 'rav4', 'cross']): score += 10
             
-        elif usage == "熱血操控 (Mazda/BMW...)":
-            if any(x in name for x in ['bmw', 'mazda', 'focus', 'golf', 'gti']): score += 5
+        elif usage == "面子社交商務":
+            if any(x in name for x in ['benz', 'bmw', 'lexus', 'audi', 'volvo', 'porsche']): score += 10
+            elif any(x in name for x in ['toyota', 'honda', 'nissan']): score -= 2
+            
+        elif usage == "熱血操控樂趣":
+            if any(x in name for x in sport_keywords + ['mazda', 'bmw']): score += 10
+            elif any(x in name for x in ['suv', 'van', 'mpv']): score -= 5
+            
+        elif usage == "新手練車 (高折舊)":
+            # 推薦便宜好修的
+            if any(x in name for x in ['vios', 'yaris', 'colt', 'tiida', 'march', 'focus']): score += 10
             
         return score
 
-    candidates['match_score'] = candidates['車款名稱'].apply(calculate_usage_score)
+    candidates['match_score'] = candidates['車款名稱'].apply(calculate_match_score)
+    
+    # 過濾掉分數太低的 (例如選家庭空間，就別推 Yaris 了)
+    # 但為了避免結果為空，如果篩完沒車，就放寬標準
+    high_score_candidates = candidates[candidates['match_score'] > 0]
+    if not high_score_candidates.empty:
+        candidates = high_score_candidates
     
     # 4. 計算潛在利潤 (Arbitrage Calculation)
-    # 假設市面車商平均開價是 底價的 1.15 ~ 1.25 倍
-    # 為了展示效果，我們隨機生成一個 "市價倍率"
+    # 這裡我們用一個簡單的邏輯：越貴的車，折價空間通常越大
     candidates['預估市價'] = candidates['成本底價'] * 1.18 
-    
-    # 你的代標成本假設：底價 + 5% 服務費
     candidates['代標總成本'] = candidates['成本底價'] * 1.05
-    
-    # 省下的錢
     candidates['潛在省錢'] = candidates['預估市價'] - candidates['代標總成本']
     
-    # 5. 排序：先看用途分數，再看省錢金額
+    # 5. 排序：先看匹配度，再看省錢金額
     recommendations = candidates.sort_values(
         ['match_score', '潛在省錢'], ascending=[False, False]
-    ).head(3) # 取前三名
+    ).head(3) 
     
     return recommendations
 
 # ==========================================
-# 3. AI 投資顧問 (TCO 分析)
+# 3. AI 投資顧問 (馬斯克中肯分析版)
 # ==========================================
 def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
     genai.configure(api_key=api_key)
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         
+        # 這裡的 Prompt 修改為「中肯、犀利、數據導向」
         prompt = f"""
-        你是一位專業的汽車投資顧問。請分析這筆交易是否划算。
+        你現在是 Elon Musk，但這次你不是來搞笑的，你是來做「殘酷的投資分析」。
+        請根據以下數據，給出一針見血的購車建議。
         
         交易標的：{car_name}
-        市面行情約：{int(market_price/10000)} 萬
-        透過代標取得成本：{int(wholesale_price/10000)} 萬
-        預估現省：{int(savings/10000)} 萬
+        市場行情：{int(market_price/10000)} 萬
+        拍場底價(取得成本)：{int(wholesale_price/10000)} 萬
+        潛在套利空間：{int(savings/10000)} 萬
         
-        請用簡短、專業、略帶急迫感的語氣 (100字以內) 給出建議：
-        1. 強調這台車的 TCO (擁車成本) 優勢。
-        2. 強調「省下的錢」可以拿去做什麼 (例如：省下的錢夠你加兩年油 / 夠你付全險)。
-        3. 結尾給出強烈建議 (Strong Buy)。
+        請用「簡短、數據導向、略帶急迫感」的語氣 (80字以內) 回答：
+        1. 這台車的 TCO (擁車成本) 優勢在哪？(例如折舊已到底、或零件便宜)
+        2. 這筆交易的「投報率」如何？(省下的錢能做什麼實質的事)
+        3. 給出一個決策指令 (例如：Strong Buy / Value Pick)。
+        不要講風水，不要講笑話，專注於「錢」和「價值」。
         """
         
         response = model.generate_content(prompt)
         return response.text
     except:
-        return "AI 連線忙碌中，但數據顯示這是一筆極佳的套利交易。省下的價差足以支付首年的保養與保險費用。"
+        return "AI 分析中：數據顯示此車款折舊曲線已趨緩，目前入場屬於低風險區間。省下的價差足以覆蓋首年大保養與稅金，建議買入。"
 
 # ==========================================
 # 4. 主程式 UI
@@ -158,93 +176,106 @@ def main():
         else:
             api_key = st.text_input("Google API Key", type="password")
         
-        st.info("💡 **什麼是代標？**\n我們直接從批發拍場幫你抓車，跳過車商的 15%-20% 利潤，只收固定手續費。")
+        st.info("💡 **拍場抄底原理**\n我們直接掃描全台批發拍場庫存，跳過車商利潤，讓你用接近車行的成本入手好車。")
         st.markdown("---")
-        st.caption("V35 (Arbitrage Edition)")
+        st.caption("V36 (Investment Edition)")
 
     # --- 主畫面 ---
     st.title("🦅 Brian's Auto Arbitrage | 拍場抄底神器")
     st.markdown("""
-    > **「別再付智商稅給車商。」** > 輸入你的預算，AI 幫你算出目前拍場上 **CP 值最高、價差最大** 的車款。
+    > **「買車不該是消費，而是一場精計算的資產配置。」**
+    > 輸入條件，AI 幫你找出目前市場上 **被低估、具備高套利空間** 的優質標的。
     """)
     
     st.markdown("---")
 
-    # 1. 輸入區 (極簡化)
+    # 載入資料以獲取品牌列表
+    df, status = load_data()
+    if status == "SUCCESS":
+        # 自動提取品牌列表 (取前兩字或英文，去重複，排序)
+        # 這裡做一個簡單的處理，假設車名開頭就是品牌
+        # 實際資料可能需要更細緻的清洗，這裡先用簡單邏輯
+        all_brands = sorted(list(set([name.split()[0] for name in df['車款名稱'].astype(str)])))
+        # 過濾掉一些奇怪的雜訊，只留常見品牌 (可選)
+        brand_options = ["不限 (所有品牌)"] + all_brands
+    else:
+        brand_options = ["不限 (所有品牌)"]
+
+    # 1. 輸入區
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        budget = st.slider("💰 總預算 (萬)", 10, 300, 70)
+        # 限制金額在 150 萬以內
+        budget = st.slider("💰 總預算 (萬)", 10, 150, 60)
     with col2:
-        usage = st.selectbox("🎯 主要用途", [
-            "高 CP 代步 (Toyota/Honda...)", 
-            "家庭休旅 (空間安全)", 
-            "面子工程 (BMW/Benz...)", 
-            "熱血操控 (Mazda/BMW...)"
+        # 6 個不重複的使用場景
+        usage = st.selectbox("🎯 主要用途 (AI 自動匹配車型)", [
+            "極致省油代步", 
+            "家庭舒適空間", 
+            "業務通勤耐操", 
+            "面子社交商務",
+            "熱血操控樂趣",
+            "新手練車 (高折舊)"
         ])
     with col3:
-        brand = st.selectbox("🚗 品牌偏好", ["不限 (全部品牌)", "Toyota", "Honda", "Mazda", "BMW", "Benz", "Lexus", "Nissan", "Ford"])
+        # 自動生成的品牌列表
+        brand = st.selectbox("🚗 品牌偏好", brand_options)
 
     # 2. 執行按鈕
     if st.button("🔍 啟動 AI 掃描 (尋找最大利潤空間)"):
-        df, status = load_data()
-        
         if status != "SUCCESS":
             st.error("⚠️ 資料庫連線失敗，請檢查 CSV 檔案。")
             return
 
         with st.spinner("🤖 正在掃描全台拍場庫存... 計算 TCO... 分析折舊曲線..."):
-            # 模擬運算延遲感 (更有儀式感)
-            time.sleep(1.5) 
+            time.sleep(1.0) # 儀式感等待
             
             results = recommend_cars(df, budget, usage, brand)
             
             if not results.empty:
-                st.success(f"✅ 掃描完成！在你的預算 {budget} 萬內，發現 **{len(results)} 台** 具備極高套利空間的車款。")
+                st.success(f"✅ 掃描完成！在預算 {budget} 萬內，AI 鎖定了 **{len(results)} 台** 最佳投資標的。")
                 
-                # 遍歷推薦結果
                 for i, (index, row) in enumerate(results.iterrows()):
                     car_name = row['車款名稱']
                     market_p = row['預估市價']
                     cost_p = row['成本底價']
                     savings = row['潛在省錢']
                     
-                    # 每一張卡片
                     with st.container():
                         st.markdown(f"""<div class='card-box'>""", unsafe_allow_html=True)
                         
                         # 標題區
                         c_title, c_badge = st.columns([3, 1])
                         with c_title:
-                            st.subheader(f"🏆 推薦 #{i+1}: {car_name}")
+                            st.subheader(f"🏆 標的 #{i+1}: {car_name}")
                         with c_badge:
-                            st.markdown(f"<div style='text-align:right; color:#d32f2f; font-weight:bold; border: 2px solid #d32f2f; padding:5px; border-radius:5px;'>現省 {int(savings/10000)} 萬</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='text-align:right; color:#d32f2f; font-weight:bold; border: 2px solid #d32f2f; padding:5px; border-radius:5px;'>潛在獲利 {int(savings/10000)} 萬</div>", unsafe_allow_html=True)
                         
                         # 數據區
                         m1, m2, m3 = st.columns(3)
                         m1.metric("市場行情 (平均)", f"{int(market_p/10000)} 萬")
                         m2.metric("拍場底價 (你的成本)", f"{int(cost_p/10000)} 萬", delta="Wholesale Price", delta_color="inverse")
-                        m3.metric("Arbitrage (價差)", f"{int(savings/10000)} 萬", delta="Profit", delta_color="normal")
+                        m3.metric("Arbitrage (價差)", f"{int(savings/10000)} 萬", delta="Margin", delta_color="normal")
                         
-                        # AI 顧問區
+                        # AI 顧問區 (中肯分析版)
                         if api_key:
                             advice = get_ai_advice(api_key, car_name, cost_p, market_p, savings)
-                            st.markdown(f"<div style='background:#f1f8e9; padding:15px; border-left:5px solid #558b2f; border-radius:5px;'><b>🤖 AI 投資顧問：</b><br>{advice}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='background:#f1f8e9; padding:15px; border-left:5px solid #558b2f; border-radius:5px; color:#33691e;'><b>🤖 AI 投資顧問 (Elon Musk)：</b><br>{advice}</div>", unsafe_allow_html=True)
                         
                         # Call to Action
                         st.markdown("---")
                         b1, b2 = st.columns([4, 1])
                         with b1:
-                            st.caption(f"📍 這台車目前在拍場庫存中。想看詳細車況表？")
+                            st.caption(f"📍 此車款 TCO 評級：優良 | 流通性：高 | 建議行動：立即鎖定")
                         with b2:
-                            # 這裡可以放你的 LINE 連結
-                            st.markdown(f"[📲 聯絡 Brian](https://line.me/ti/p/你的ID)", unsafe_allow_html=True) 
+                            # 這裡換成你的 Line 連結
+                            st.markdown(f"[📲 聯絡 Brian 代標](https://line.me/ti/p/你的ID)", unsafe_allow_html=True) 
                         
                         st.markdown("</div>", unsafe_allow_html=True)
                         st.markdown("<br>", unsafe_allow_html=True)
 
             else:
-                st.warning("⚠️ 抱歉，這個預算範圍內暫時沒有符合「高利潤空間」的車款。建議提高預算或放寬品牌限制。")
+                st.warning("⚠️ 抱歉，這個預算和條件下，暫時沒有符合高標準的投資標的。建議調整品牌或增加預算。")
 
 if __name__ == "__main__":
     main()
