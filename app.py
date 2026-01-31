@@ -12,7 +12,7 @@ import time
 # ==========================================
 # 0. 核心設定
 # ==========================================
-st.set_page_config(page_title="Brian AI 戰情室 (V27-防重疊版)", page_icon="🦅", layout="centered")
+st.set_page_config(page_title="Brian AI 戰情室 (V28-神隱版)", page_icon="🦅", layout="centered")
 
 # --- 字型設定 ---
 FONT_PATH_BOLD = "msjhbd.ttc" 
@@ -115,11 +115,10 @@ def get_analysis(api_key, image, user_price, car_info):
         return None, error_msg
 
 # ==========================================
-# 3. 圖片生成引擎 (V27：超級加寬版)
+# 3. 圖片生成引擎 (V28：底價移除版)
 # ==========================================
 def create_report_card(car_image, ai_data, user_price, car_info):
-    # 1. 畫布拉長到 1400，空間給好給滿
-    W, H = 850, 1400 
+    W, H = 850, 1300 # 高度維持 1300，空間很夠
     bg_color = (25, 20, 35)
     card = Image.new('RGB', (W, H), bg_color)
     draw = ImageDraw.Draw(card)
@@ -147,15 +146,12 @@ def create_report_card(car_image, ai_data, user_price, car_info):
     draw.text((620, 630), "賣家開價", font=text_font, fill=(200, 200, 200))
     draw.text((620, 675), f"${user_price}萬", font=subtitle_font, fill=(255, 255, 255))
 
-    # --- 關鍵修正區：底價顯示 (Y=740) ---
-    if car_info and '成本底價' in car_info:
-        wholesale_val = car_info['成本底價'] / 10000 
-        draw.text((620, 740), "AI 估算底價", font=text_font, fill=(150, 150, 150))
-        draw.text((620, 775), f"${wholesale_val}萬", font=subtitle_font, fill=(0, 255, 100)) # 綠色
+    # --- 關鍵修改：完全不顯示底價 ---
+    # (原本在這裡的底價顯示代碼已經刪除)
+    # 這裡只留一個空的佔位，或是什麼都不放，讓畫面乾淨
 
-    # --- 第二層：馬斯克評語 (大幅下移至 Y=860，完全避開上面) ---
-    # 之前是 780 或 830，現在直接推到 860，保證不撞車
-    START_Y_MUSK = 860
+    # --- 第二層：馬斯克評語 (維持 Y=830) ---
+    START_Y_MUSK = 830 
     
     verdict = ai_data.get('verdict_short', 'N/A').upper()
     verdict_color = (255, 50, 50) if "RUN" in verdict else (0, 255, 0)
@@ -174,8 +170,8 @@ def create_report_card(car_image, ai_data, user_price, car_info):
         draw.text((x_comment, y_text), line, font=comment_font, fill=(230, 230, 230))
         y_text += 30
 
-    # --- 第三層：風水分析 (下移至 Y=1150) ---
-    START_Y_FENGSHUI = 1150
+    # --- 第三層：風水分析 (維持 Y=1050) ---
+    START_Y_FENGSHUI = 1050
     draw.line((20, START_Y_FENGSHUI - 20, 830, START_Y_FENGSHUI - 20), fill=(100, 100, 100), width=1)
     
     feng_shui = ai_data.get('feng_shui', '分析中...')
@@ -187,7 +183,7 @@ def create_report_card(car_image, ai_data, user_price, car_info):
         draw.text((40, y_fs), line, font=text_font, fill=(255, 255, 200))
         y_fs += 35
 
-    draw.text((20, 1350), "Powered by Brian's AI | 買車看數據，也看天意", font=small_font, fill=(100, 100, 100))
+    draw.text((20, 1250), "Powered by Brian's AI | 買車看數據，也看天意", font=small_font, fill=(100, 100, 100))
     return card
 
 # ==========================================
@@ -205,7 +201,7 @@ def main():
         else:
             api_key = st.text_input("Google API Key", type="password")
             
-        st.caption("V27 (加寬版)")
+        st.caption("V28 (底價神隱版)")
 
     st.title("🦅 拍賣場 AI 戰情室")
 
