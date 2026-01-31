@@ -4,7 +4,6 @@ import pandas as pd
 import os
 import random
 import time
-import re
 
 # ==========================================
 # 0. 核心設定
@@ -78,7 +77,7 @@ def load_data():
     except Exception as e: return pd.DataFrame(), f"ERROR: {str(e)}"
 
 # ==========================================
-# 2. 推薦演算法 (差異化對決)
+# 2. 推薦演算法 (V40核心：品牌強制優先)
 # ==========================================
 def recommend_cars(df, budget_limit, usage, brand_pref):
     budget_max = budget_limit * 10000
@@ -91,12 +90,20 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
     
     if candidates.empty: return pd.DataFrame()
     
+    # 用途關鍵字
     suv_keywords = ['CR-V', 'RAV4', 'KUGA', 'X-TRAIL', 'SUV', 'CX-5', 'ODYSSEY', 'GLC', 'RX', 'NX', 'TIGUAN', 'SPORTAGE', 'TUCSON', 'OUTLANDER', 'URX', 'SIENTA', 'CROSS', 'HR-V']
     
-    def calculate_match_score(car_name):
+    def calculate_match_score(row):
         score = 0
-        name = car_name
+        name = row['車款名稱']
+        brand = row['Brand']
         
+        # --- V40 修正：品牌忠誠度加分 ---
+        # 如果這台車是使用者指定的品牌，直接 +1000 分，確保它一定會出現
+        if brand_pref != "不限 (所有品牌)" and brand == brand_pref:
+            score += 1000 
+
+        # 用途加分
         if usage == "極致省油代步":
             if any(x in name for x in ['ALTIS', 'VIOS', 'YARIS', 'FIT', 'PRIUS', 'HYBRID', 'CITY', 'MARCH', 'COLT', 'SENTRA']): score += 10
             elif any(x in name for x in suv_keywords): score -= 5 
@@ -109,20 +116,27 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
             if any(x in name for x in ['BENZ', 'BMW', 'LEXUS', 'AUDI', 'VOLVO', 'PORSCHE']): score += 10
             elif any(x in name for x in ['TOYOTA', 'HONDA', 'NISSAN']): score -= 2
         elif usage == "熱血操控樂趣":
-            if any(x in name for x in ['BMW', 'FOCUS', 'GOLF', 'MAZDA', 'MX-5', '86', 'WRX', 'COOPER', 'MUSTANG']): score += 10
+            if any(x in name for x in ['BMW', 'FOCUS', 'GOLF', 'MAZDA', 'MX-5', '86', 'WRX', 'COOPER', 'MUSTANG', 'ST', 'GTI']): score += 10
             elif any(x in name for x in ['SUV', 'VAN']): score -= 5
         elif usage == "新手練車 (高折舊)":
             if any(x in name for x in ['VIOS', 'YARIS', 'COLT', 'TIIDA', 'MARCH', 'FOCUS', 'LIVINA']): score += 10
             
         return score
 
-    candidates['match_score'] = candidates['車款名稱'].apply(calculate_match_score)
-    candidates = candidates[candidates['match_score'] > 0]
+    candidates['match_score'] = candidates.apply(calculate_match_score, axis=1)
     
+    # 這裡稍微放寬過濾標準：如果是優先品牌，就算分數低也不要過濾掉
+    if brand_pref != "不限 (所有品牌)":
+        candidates = candidates[(candidates['match_score'] > 0) | (candidates['Brand'] == brand_pref)]
+    else:
+        candidates = candidates[candidates['match_score'] > 0]
+
+    # 計算財務
     candidates['預估市價'] = candidates['成本底價'] * 1.18 
     candidates['代標總成本'] = candidates['成本底價'] * 1.05
     candidates['潛在省錢'] = candidates['預估市價'] - candidates['代標總成本']
 
+    # 去重
     candidates = candidates.sort_values('成本底價', ascending=True)
     candidates = candidates.drop_duplicates(subset=['車款名稱'], keep='first')
 
@@ -130,15 +144,18 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
 
     final_list = []
     
-    # 策略 A: 首選品牌
+    # === 策略 A: 絕對首選 (Hero) ===
     if brand_pref != "不限 (所有品牌)":
+        # 找出該品牌分數最高的
         preferred_cars = candidates[candidates['Brand'] == brand_pref].sort_values(['match_score', '潛在省錢'], ascending=[False, False])
+        
         if not preferred_cars.empty:
             hero_car = preferred_cars.iloc[0]
-            hero_car['Role'] = '🏆 首選推薦'
+            hero_car['Role'] = '🏆 首選推薦' # 絕對是使用者選的品牌
             final_list.append(hero_car)
             
-            # 找對手
+            # === 找對手 (Challengers) ===
+            # 排除偏好品牌
             other_cars = candidates[candidates['Brand'] != brand_pref].sort_values(['match_score', '潛在省錢'], ascending=[False, False])
             added_brands = set()
             for idx, row in other_cars.iterrows():
@@ -148,71 +165,82 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
                     final_list.append(row)
                     added_brands.add(row['Brand'])
     
-    # 策略 B: 通用邏輯
-    if len(final_list) < 3:
-        existing_ids = [x['車款名稱'] for x in final_list]
-        remaining = candidates[~candidates['車款名稱'].isin(existing_ids)].sort_values(['match_score', '潛在省錢'], ascending=[False, False])
-        added_brands = set([x['Brand'] for x in final_list])
+    # === 策略 B: 通用邏輯 (如果沒選品牌，或首選品牌沒車) ===
+    if len(final_list) == 0:
+        # 如果上面沒找到任何車，就直接找分數最高的
+        candidates = candidates.sort_values(['match_score', '潛在省錢'], ascending=[False, False])
+        added_brands = set()
         
-        for idx, row in remaining.iterrows():
+        for idx, row in candidates.iterrows():
             if len(final_list) >= 3: break
             if row['Brand'] not in added_brands:
                 row['Role'] = '💎 優質精選' if len(final_list) == 0 else '⚔️ 同級對比'
                 final_list.append(row)
                 added_brands.add(row['Brand'])
-        
-        if len(final_list) < 3:
-            for idx, row in remaining.iterrows():
-                if len(final_list) >= 3: break
-                if row['車款名稱'] not in [x['車款名稱'] for x in final_list]:
-                    row['Role'] = '🔥 熱門候補'
-                    final_list.append(row)
+    
+    # 補滿 3 台 (如果品牌不夠多)
+    if len(final_list) < 3 and not candidates.empty:
+        existing_names = [x['車款名稱'] for x in final_list]
+        remaining = candidates[~candidates['車款名稱'].isin(existing_names)].sort_values('match_score', ascending=False)
+        for idx, row in remaining.iterrows():
+             if len(final_list) >= 3: break
+             row['Role'] = '🔥 熱門候補'
+             final_list.append(row)
 
     return pd.DataFrame(final_list)
 
 # ==========================================
-# 3. AI 投資顧問 (V39核心：看人說人話)
+# 3. AI 投資顧問 (V40核心：海量多樣化金句庫)
 # ==========================================
 def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
     
-    # 1. 定義車輛屬性 (豪華 vs 平價 vs 樂趣)
+    # 1. 識別車型階級
     luxury_brands = ['BENZ', 'BMW', 'LEXUS', 'AUDI', 'VOLVO', 'PORSCHE', 'INFINITI']
-    fun_brands = ['MAZDA', 'MINI', 'SUBARU']
+    fun_brands = ['MAZDA', 'MINI', 'SUBARU', 'GOLF', 'FOCUS', '86']
     
     car_type = "economy"
     if any(b in car_name for b in luxury_brands): car_type = "luxury"
     elif any(b in car_name for b in fun_brands): car_type = "fun"
     
-    # 2. 定義備用金句庫 (AI 失敗時隨機使用，避免重複)
-    fallback_luxury = [
-        "此車款折舊已過甜蜜點，現在入手等於是用國產車價格買到進口車的『社交面子』，極具持有價值。",
-        "對於需要商務門面的買家，這台車的『氣場』遠高於它的實際成本，屬於高槓桿的資產配置。",
-        "這台車開出去談生意的ROI極高。省下的價差建議保留作為後續精緻養護基金，維持最佳車況。"
-    ]
-    fallback_economy = [
-        "這台車是市場公認的『現金流守護者』。超低的持有成本加上穩定的妥善率，買它是為了把錢省下來做投資。",
-        "代步車的極致選擇。拍場價格極具優勢，未來轉手的虧損極低，幾乎等於免費開幾年。",
-        "省下的價差足夠讓你加兩三年的油。如果你在乎的是『實用』與『荷包』，這台車是 Strong Buy。"
-    ]
-    fallback_fun = [
-        "買這台車買的是『情緒價值』。在拍場用這種價格入手樂趣車款，是男人最聰明的玩具投資。",
-        "這種車款在市場上流通快，現在抄底入手，玩個兩年再賣掉可能都不會虧錢。"
-    ]
+    # 2. 定義金句庫 (即使 AI 失敗，也能隨機吐出不同觀點)
+    fallback_dict = {
+        "luxury": [
+            "這種車買的是『社交籌碼』。現在入手等於用國產車的價格買到談生意的門票，折舊已經由前一手幫你扛了。",
+            "對於商務人士來說，這台車的 ROI (投報率) 極高。開出去的氣場遠超過它的拍場成本。",
+            "進口車最怕買貴。但以這個拍場底價入手，就算開一年再賣掉，可能都還比租車便宜。",
+            "這就是『資產配置』的魅力。把面子做足，裡子也省到了。省下的價差建議保留做為精緻養護基金。",
+            "數據顯示此豪華車款已進入折舊平原期。現在進場，等於是享受了最精華的年份，卻付出了最低的成本。"
+        ],
+        "economy": [
+            "這台車是標準的『現金流守護者』。超低的持有成本，買它就是為了把錢省下來去做更有意義的投資。",
+            "代步車的真諦：省油、好養、不虧錢。拍場價格極具優勢，這筆交易絕對是正期望值。",
+            "別把錢浪費在會折舊的鐵皮上。這台車已經跌無可跌，是精明理財者的首選。",
+            "省下的這幾萬塊價差，足夠你加兩年的油加上換四條頂級輪胎。這才是真正的『懂車』。",
+            "如果你需要的是一台『不給你找麻煩』的工具，這台車的 CP 值在目前市場上無人能敵。"
+        ],
+        "fun": [
+            "買這台車買的是『情緒價值』。在拍場用這種價格入手樂趣車款，是男人最聰明的玩具投資。",
+            "这种性能車款流通性好，現在抄底入手，玩個兩年再賣掉，搞不好還能小賺一筆。",
+            "人生苦短，要開有趣的車。用這種成本買到這種操控樂趣，這筆交易本身就是一種享受。",
+            "這台車的樂趣/價格比 (Fun-to-Price Ratio) 極高。建議入手後把省下的錢拿去升級底盤。",
+            "懂車的人都知道這台的好。拍場出現這種價格是難得的機會，手慢無。"
+        ]
+    }
 
+    # 3. 嘗試呼叫 AI
     genai.configure(api_key=api_key)
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         
-        # 3. 根據車型構建專屬 Prompt
         if car_type == "luxury":
-            prompt_theme = "強調『面子、社交資產、氣場』。告訴使用者開這台車出去談生意或載人多有面子，且用拍場價買入是多麼聰明的『資產配置』。"
+            prompt_theme = "強調『面子、社交槓桿、資產價值』。告訴他用這種價格買到這種牌子是多麼精明的生意。"
         elif car_type == "fun":
-            prompt_theme = "強調『駕駛樂趣、情緒價值』。告訴使用者用便宜價格買個大玩具是多划算的事。"
-        else: # economy
-            prompt_theme = "強調『CP值、省油、好養、現金流』。告訴使用者把錢省下來買股票或付房貸更實際，這台車是用來省錢的。"
+            prompt_theme = "強調『情緒價值、駕駛樂趣、玩具屬性』。告訴他花小錢買大樂趣是多划算。"
+        else:
+            prompt_theme = "強調『實用主義、現金流、TCO極小化』。告訴他省下的錢可以拿去買股票。"
 
         prompt = f"""
-        你是一位精明的汽車投資顧問。標的：{car_name} (市價 {int(market_price/10000)}萬 vs 拍場 {int(wholesale_price/10000)}萬)。
+        你是一位投資型汽車顧問。標的：{car_name} (市價 {int(market_price/10000)}萬 vs 拍場 {int(wholesale_price/10000)}萬)。
         
         請用「簡短、犀利、中肯」的語氣 (60字內) 給出建議：
         核心策略：{prompt_theme}
@@ -222,10 +250,8 @@ def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
         response = model.generate_content(prompt)
         return response.text
     except:
-        # 4. API 失敗時，根據車型隨機挑選備用金句
-        if car_type == "luxury": return random.choice(fallback_luxury)
-        elif car_type == "fun": return random.choice(fallback_fun)
-        else: return random.choice(fallback_economy)
+        # 4. 失敗時，隨機抽取一句 (不再重複)
+        return random.choice(fallback_dict[car_type])
 
 # ==========================================
 # 4. 主程式 UI
@@ -240,7 +266,7 @@ def main():
             api_key = st.text_input("Google API Key", type="password")
         
         st.info("💡 **差異化推薦引擎**\n系統會優先尋找你偏好的品牌，並自動匹配其他品牌的同級車款進行「TCO 對比」。")
-        st.caption("V39 (Context-Aware Edition)")
+        st.caption("V40 (Precision & Variety Edition)")
 
     st.title("🦅 Brian's Auto Arbitrage | 拍場抄底神器")
     st.markdown("""
@@ -274,7 +300,7 @@ def main():
             return
 
         with st.spinner("🤖 正在進行多品牌 TCO 對決... 分析面子與裡子..."):
-            time.sleep(1.0) 
+            time.sleep(0.8) 
             
             results = recommend_cars(df, budget, usage, brand)
             
@@ -309,7 +335,6 @@ def main():
                         # AI Advice
                         if api_key:
                             advice = get_ai_advice(api_key, car_name, cost_p, market_p, savings)
-                            # 根據角色不同，框框顏色也不同
                             border_color = role_bg
                             st.markdown(f"<div style='background:#f9f9f9; padding:15px; border-left:5px solid {border_color}; border-radius:5px; color:#333;'><b>🤖 AI 投資觀點：</b><br>{advice}</div>", unsafe_allow_html=True)
                         
