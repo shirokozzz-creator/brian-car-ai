@@ -48,21 +48,12 @@ st.markdown("""
     .stButton>button:hover { background-color: #0d47a1; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
     .role-tag { font-size: 0.8em; padding: 4px 8px; border-radius: 4px; color: white; font-weight: bold; display: inline-block; }
     .tag-pill { background-color: #e3f2fd; color: #1565c0; padding: 2px 8px; border-radius: 10px; font-size: 0.8em; margin-right: 5px; }
-    
-    /* V47 新增：委託單樣式 */
-    .order-paper {
-        background-color: #f8f9fa;
-        border: 2px dashed #1565c0;
-        padding: 20px;
-        border-radius: 10px;
-        font-family: monospace;
-        color: #333;
-    }
+    .order-paper { background-color: #f8f9fa; border: 2px dashed #1565c0; padding: 20px; border-radius: 10px; font-family: monospace; color: #333; }
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 資料庫讀取 (維持 V46)
+# 1. 資料庫讀取
 # ==========================================
 @st.cache_data
 def load_data():
@@ -88,7 +79,7 @@ def load_data():
     except Exception as e: return pd.DataFrame(), f"ERROR: {str(e)}"
 
 # ==========================================
-# 2. 推薦演算法 (維持 V46)
+# 2. 推薦演算法
 # ==========================================
 def recommend_cars(df, budget_limit, usage, brand_pref):
     budget_max = budget_limit * 10000
@@ -196,9 +187,15 @@ def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
     except: return random.choice(fallback_dict[car_type])
 
 # ==========================================
-# 4. 主程式 UI (V47：自助委託結單版)
+# 4. 主程式 UI (V48：記憶體固化版)
 # ==========================================
 def main():
+    # 🌟 初始化 Session State (網頁記憶體)
+    if 'search_clicked' not in st.session_state:
+        st.session_state['search_clicked'] = False
+    if 'results' not in st.session_state:
+        st.session_state['results'] = pd.DataFrame()
+
     with st.sidebar:
         st.header("🦅 設定控制台")
         if "GOOGLE_API_KEY" in st.secrets:
@@ -206,8 +203,8 @@ def main():
             st.success("✅ AI 顧問已連線")
         else:
             api_key = st.text_input("Google API Key", type="password")
-        st.info("💡 **無人自助委託**\n選定車款後，直接在下方生成「正式委託單」，複製給 Brian 即可啟動代標流程。無須推銷對話。")
-        st.caption("V47 (Self-Service Kiosk)")
+        st.info("💡 **無人自助委託**\n選定車款後，直接在下方生成「正式委託單」，複製給 Brian 即可啟動代標流程。")
+        st.caption("V48 (Persistence Edition)")
 
     st.title("🦅 Brian's Auto Arbitrage | 拍場抄底神器")
     
@@ -240,59 +237,68 @@ def main():
     with col2: usage = st.selectbox("🎯 主要用途", ["極致省油代步", "家庭舒適空間", "業務通勤耐操", "面子社交商務", "熱血操控樂趣", "新手練車 (高折舊)"])
     with col3: brand = st.selectbox("🚗 優先品牌", brand_options)
 
+    # 🌟 搜尋按鈕邏輯修正
     if st.button("🔍 啟動 AI 差異化對決"):
         if status != "SUCCESS":
             st.error("⚠️ 資料庫讀取失敗")
-            return
+        else:
+            with st.spinner("🤖 正在執行 TCO 財務模型分析..."):
+                time.sleep(1.0) 
+                # 計算並存入 Session State
+                results = recommend_cars(df, budget, usage, brand)
+                st.session_state['results'] = results
+                st.session_state['search_clicked'] = True
 
-        with st.spinner("🤖 正在執行 TCO 財務模型分析..."):
-            time.sleep(1.0) 
-            results = recommend_cars(df, budget, usage, brand)
+    # 🌟 顯示結果 (即使重新整理也會顯示)
+    if st.session_state['search_clicked']:
+        results = st.session_state['results']
+        
+        if not results.empty:
+            st.success(f"✅ AI 鎖定了 **{len(results)} 台** 最佳獲利標的。")
             
-            if not results.empty:
-                st.session_state['results'] = results # 存入 session state 以便下方取用
-                st.success(f"✅ AI 鎖定了 **{len(results)} 台** 最佳獲利標的。")
+            for i, (index, row) in enumerate(results.iterrows()):
+                car_name = row['車款名稱']
+                market_p = row['預估市價']
+                cost_p = row['成本底價']
+                savings = row['潛在省錢']
+                role = row.get('Role', '推薦標的')
+                role_bg = "#d32f2f" if "首選" in role else "#1976d2" if "競品" in role else "#616161"
                 
-                for i, (index, row) in enumerate(results.iterrows()):
-                    car_name = row['車款名稱']
-                    market_p = row['預估市價']
-                    cost_p = row['成本底價']
-                    savings = row['潛在省錢']
-                    role = row.get('Role', '推薦標的')
-                    role_bg = "#d32f2f" if "首選" in role else "#1976d2" if "競品" in role else "#616161"
+                with st.container():
+                    st.markdown(f"""<div class='card-box'>""", unsafe_allow_html=True)
+                    c_title, c_badge = st.columns([3, 1])
+                    with c_title: st.markdown(f"### {role}: {car_name}")
+                    with c_badge: st.markdown(f"<span class='role-tag' style='background-color:{role_bg}; float:right;'>{role}</span>", unsafe_allow_html=True)
                     
-                    with st.container():
-                        st.markdown(f"""<div class='card-box'>""", unsafe_allow_html=True)
-                        c_title, c_badge = st.columns([3, 1])
-                        with c_title: st.markdown(f"### {role}: {car_name}")
-                        with c_badge: st.markdown(f"<span class='role-tag' style='background-color:{role_bg}; float:right;'>{role}</span>", unsafe_allow_html=True)
-                        
-                        m1, m2, m3 = st.columns(3)
-                        m1.metric("市場行情", f"{int(market_p/10000)} 萬")
-                        m2.metric("拍場預估", f"{int(cost_p/10000)} 萬", delta="Wholesale", delta_color="inverse")
-                        m3.metric("Arbitrage", f"{int(savings/10000)} 萬", delta="Spread", delta_color="normal")
-                        
-                        if api_key:
-                            advice = get_ai_advice(api_key, car_name, cost_p, market_p, savings)
-                            st.markdown(f"<div style='background:#f9f9f9; padding:15px; border-left:5px solid {role_bg}; border-radius:5px; color:#333;'><b>🤖 AI 投資觀點：</b><br>{advice}</div>", unsafe_allow_html=True)
-                        st.markdown("</div>", unsafe_allow_html=True)
-            else:
-                st.warning(f"⚠️ 找不到符合條件的車。")
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("市場行情", f"{int(market_p/10000)} 萬")
+                    m2.metric("拍場預估", f"{int(cost_p/10000)} 萬", delta="Wholesale", delta_color="inverse")
+                    m3.metric("Arbitrage", f"{int(savings/10000)} 萬", delta="Spread", delta_color="normal")
+                    
+                    if api_key:
+                        advice = get_ai_advice(api_key, car_name, cost_p, market_p, savings)
+                        st.markdown(f"<div style='background:#f9f9f9; padding:15px; border-left:5px solid {role_bg}; border-radius:5px; color:#333;'><b>🤖 AI 投資觀點：</b><br>{advice}</div>", unsafe_allow_html=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.warning(f"⚠️ 找不到符合條件的車。")
 
     # ==========================================
-    # 🔥 V47 新增：無人自助委託站 (Order Kiosk)
+    # 🔥 自助委託結單 (資料源整合修正)
     # ==========================================
     st.markdown("---")
     st.header("📝 自助委託結單 (Self-Service Kiosk)")
-    st.caption("選好車了嗎？不需要跟業務講電話。直接填寫需求，AI 會幫你生成正式委託單，複製給 Brian 即可。")
-
+    
     with st.form("order_form"):
-        # 讓使用者選擇剛剛 AI 推薦的車，或是手動輸入
-        # 這裡做一個簡單的處理：如果上面有搜尋結果，就列出來讓選
-        
+        # 整合精選車 + AI 搜尋結果到選單中
         car_choices = ["請選擇車款..."]
-        if 'results' in st.session_state and not st.session_state['results'].empty:
+        
+        # 1. 加入本週精選
+        car_choices += [f"🔥 {c['name']}" for c in FEATURED_CARS]
+        
+        # 2. 加入 AI 搜尋結果 (如果有)
+        if st.session_state['search_clicked'] and not st.session_state['results'].empty:
             car_choices += st.session_state['results']['車款名稱'].tolist()
+            
         car_choices.append("其他 (手動輸入)")
         
         c1, c2 = st.columns(2)
@@ -315,7 +321,6 @@ def main():
             elif not line_id:
                 st.error("❌ 請輸入 Line ID 以便聯絡")
             else:
-                # 生成委託單文本
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
                 order_text = f"""
 【Brian Auto Arbitrage 委託單】
