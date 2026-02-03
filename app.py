@@ -1,7 +1,25 @@
 import streamlit as st
-import google.generativeai as genai
-import pandas as pd
+import sys
+import subprocess
 import os
+
+# ==========================================
+# 🛠️ 強制修復區：自動升級 AI 套件 (核彈級解法)
+# ==========================================
+# 這段程式碼會強迫伺服器安裝最新版，不管它原本想用舊版
+try:
+    import google.generativeai as genai
+    # 檢查版本，如果太舊就強制升級
+    current_version = getattr(genai, '__version__', '0.0.0')
+    if current_version < "0.7.0":
+        raise ImportError("Version too old")
+except (ImportError, AttributeError):
+    print("⚠️ 偵測到舊版套件，正在強制升級 google-generativeai...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-U", "google-generativeai>=0.7.0"])
+    import google.generativeai as genai
+
+# 重新載入其他套件
+import pandas as pd
 import random
 import time
 from datetime import datetime
@@ -167,7 +185,7 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
     return pd.DataFrame(final_list)
 
 # ==========================================
-# 3. AI 投資顧問 & 驗車官 (V52: 自動Fallback)
+# 3. AI 投資顧問 & 驗車官 (多重備援)
 # ==========================================
 def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
     genai.configure(api_key=api_key)
@@ -181,16 +199,14 @@ def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
 def analyze_inspection_sheet(api_key, image):
     genai.configure(api_key=api_key)
     
-    # 定義模型候選清單 (從新到舊)
-    # 這樣可以避免 404 錯誤，自動找到能用的模型
+    # 自動切換模型，直到成功
     candidate_models = [
         'gemini-1.5-flash', 
-        'gemini-1.5-pro', 
-        'gemini-pro-vision' # 這是上一代最穩定的視覺模型
+        'gemini-1.5-pro',
+        'gemini-pro-vision' 
     ]
     
     last_error = ""
-    
     prompt = """
     你是一位專業的中古車查定師。請分析這張『車輛查定表』(Vehicle Inspection Sheet)。
     
@@ -208,12 +224,12 @@ def analyze_inspection_sheet(api_key, image):
         try:
             model = genai.GenerativeModel(model_name)
             response = model.generate_content([prompt, image])
-            return response.text # 成功就直接回傳
+            return response.text, model_name # 成功
         except Exception as e:
             last_error = str(e)
-            continue # 失敗就換下一個模型
+            continue 
 
-    return f"AI 解析失敗 (所有模型皆無法使用): {last_error}。請確認 API Key 是否正確。"
+    return f"AI 解析失敗 (請確認 API Key 是否正確): {last_error}", None
 
 # ==========================================
 # 4. 主程式 UI
@@ -239,14 +255,18 @@ def main():
                 uploaded_sheet = st.file_uploader("上傳查定表 (圖片)", type=['jpg', 'png', 'jpeg'])
                 
                 if uploaded_sheet and st.button("🔍 啟動 AI 驗車"):
-                    with st.spinner("🤖 AI 正在掃描結構 (自動切換最佳模型)..."):
+                    with st.spinner("🤖 AI 正在掃描結構 (自動偵測模型)..."):
                         img = Image.open(uploaded_sheet)
                         st.image(img, caption="查定表預覽", use_column_width=True)
                         if api_key:
-                            report = analyze_inspection_sheet(api_key, img)
+                            report, used_model = analyze_inspection_sheet(api_key, img)
                             st.markdown("<div class='admin-box'>", unsafe_allow_html=True)
-                            st.markdown("### 📋 AI 驗車報告 (可直接複製傳給客戶)")
-                            st.markdown(report)
+                            if used_model:
+                                st.caption(f"✅ 使用模型: {used_model}")
+                                st.markdown("### 📋 AI 驗車報告 (可直接複製傳給客戶)")
+                                st.markdown(report)
+                            else:
+                                st.error(report)
                             st.markdown("</div>", unsafe_allow_html=True)
                         else:
                             st.error("請先輸入 API Key")
