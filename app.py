@@ -54,6 +54,7 @@ st.markdown("""
     .step-title { font-weight: bold; font-size: 1.1em; color: #2e7d32; margin-bottom: 5px; }
     .step-desc { font-size: 0.9em; color: #555; }
     .admin-box { background-color: #263238; color: #eceff1; padding: 15px; border-radius: 10px; border-left: 5px solid #ffab00; }
+    .order-paper { background-color: #f8f9fa; border: 2px dashed #1565c0; padding: 20px; border-radius: 10px; font-family: monospace; color: #333; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -166,10 +167,9 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
     return pd.DataFrame(final_list)
 
 # ==========================================
-# 3. AI 投資顧問 & 驗車官
+# 3. AI 投資顧問 & 驗車官 (修復版)
 # ==========================================
 def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
-    # ... (原有代碼) ...
     genai.configure(api_key=api_key)
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
@@ -178,28 +178,29 @@ def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
         return response.text
     except: return "AI 分析：數據顯示此車款目前位於折舊甜蜜點，拍場價格極具優勢。"
 
-# V50 新增：AI 驗車官功能
 def analyze_inspection_sheet(api_key, image):
     genai.configure(api_key=api_key)
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # V51 修復：改用 'gemini-1.5-pro'，這個模型看圖更穩，且較少出現 404
+        model = genai.GenerativeModel('gemini-1.5-pro')
         
         prompt = """
         你是一位專業的中古車查定師。請分析這張『車輛查定表』(Vehicle Inspection Sheet)。
         
         請輸出以下結構化報告 (繁體中文)：
         1. **【車輛基本資料】**：年份、廠牌車型、里程數。
-        2. **【關鍵評級】**：車體評級 (Grade)、內裝評級。告訴我這分數代表什麼意思 (例如 D級代表有結構傷)。
-        3. **【重大車況警示】**：仔細看車體結構圖，有沒有 'X' (更換) 或 'R' (修復)？如果有，是在哪裡 (例如後樑、門板)？這對安全性或價值有什麼影響？
-        4. **【Brian 的建議】**：根據以上狀況，給出一個簡單的結論。例如：「此車為事故車，建議新手勿碰」或「車況極佳，可以放心下標」。
+        2. **【關鍵評級】**：車體評級 (Grade)、內裝評級。請解釋評級含義 (例如 D級=結構受損)。
+        3. **【重大車況警示】**：請仔細辨識車體結構圖，尋找 'X' (更換) 或 'R' (修復) 標記。若有，請指出位置 (如：後圍板、劍尾、大樑)。
+        4. **【文字備註解讀】**：請讀取表格中的手寫或打字備註 (例如：後工字樑更換)。
+        5. **【Brian 的建議】**：綜合以上，給出買入建議 (推薦/不推薦/需專業評估)。
         
-        語氣要專業、客觀，直接講重點，不要廢話。
+        語氣專業、客觀。
         """
         
         response = model.generate_content([prompt, image])
         return response.text
     except Exception as e:
-        return f"AI 解析失敗：{str(e)}"
+        return f"AI 解析失敗：{str(e)}。建議檢查 API Key 是否有權限使用 gemini-1.5-pro 模型。"
 
 # ==========================================
 # 4. 主程式 UI
@@ -216,33 +217,32 @@ def main():
         else:
             api_key = st.text_input("Google API Key", type="password")
         
-        # === 🔥 V50 新增：管理員後台 (AI 驗車官) ===
+        # 管理員後台
         st.markdown("---")
         with st.expander("🔐 管理員專用：查定表分析"):
             admin_pwd = st.text_input("請輸入管理密碼", type="password")
-            if admin_pwd == "brian888": # 設定你的密碼
+            if admin_pwd == "brian888": 
                 st.success("身分驗證成功：Brian")
                 uploaded_sheet = st.file_uploader("上傳查定表 (圖片)", type=['jpg', 'png', 'jpeg'])
                 
                 if uploaded_sheet and st.button("🔍 啟動 AI 驗車"):
-                    with st.spinner("🤖 AI 正在檢查大樑與結構..."):
+                    with st.spinner("🤖 AI 正在檢查大樑與結構 (切換至 Pro 模型)..."):
                         img = Image.open(uploaded_sheet)
                         st.image(img, caption="查定表預覽", use_column_width=True)
-                        
-                        report = analyze_inspection_sheet(api_key, img)
-                        
-                        st.markdown("<div class='admin-box'>", unsafe_allow_html=True)
-                        st.markdown("### 📋 AI 驗車報告 (可直接複製傳給客戶)")
-                        st.markdown(report)
-                        st.markdown("</div>", unsafe_allow_html=True)
+                        if api_key:
+                            report = analyze_inspection_sheet(api_key, img)
+                            st.markdown("<div class='admin-box'>", unsafe_allow_html=True)
+                            st.markdown("### 📋 AI 驗車報告 (可直接複製傳給客戶)")
+                            st.markdown(report)
+                            st.markdown("</div>", unsafe_allow_html=True)
+                        else:
+                            st.error("請先輸入 API Key")
             elif admin_pwd:
                 st.error("密碼錯誤")
 
     st.title("🦅 Brian's Auto Arbitrage | 拍場抄底神器")
 
-    # ==========================================
-    # 📖 代標流程懶人包
-    # ==========================================
+    # 30秒懶人包
     with st.container():
         st.markdown("### 📖 30秒懂代標：你只需要做 4 件事")
         c1, c2, c3, c4 = st.columns(4)
