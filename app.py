@@ -11,7 +11,7 @@ from datetime import datetime
 # ==========================================
 st.set_page_config(page_title="Brian's Auto Arbitrage | 拍場抄底神器", page_icon="🦅", layout="wide")
 
-# 🔥🔥🔥 Brian 的精選車庫 🔥🔥🔥
+# 🔥 精選車庫 🔥
 FEATURED_CARS = [
     {
         "name": "2020 BENZ C300 AMG",
@@ -41,6 +41,7 @@ FEATURED_CARS = [
 
 st.markdown("""
     <style>
+    /* 卡片與按鈕樣式 */
     .card-box { background-color: #ffffff; padding: 20px; border-radius: 10px; border: 1px solid #e0e0e0; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
     .featured-card { background: linear-gradient(135deg, #fff8e1 0%, #ffffff 100%); padding: 20px; border-radius: 12px; border: 2px solid #ffb300; box-shadow: 0 6px 12px rgba(255, 179, 0, 0.2); margin-bottom: 25px; position: relative; }
     .featured-badge { position: absolute; top: -12px; right: 20px; background-color: #d32f2f; color: white; padding: 4px 12px; border-radius: 20px; font-weight: bold; font-size: 0.9em; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
@@ -48,7 +49,20 @@ st.markdown("""
     .stButton>button:hover { background-color: #0d47a1; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
     .role-tag { font-size: 0.8em; padding: 4px 8px; border-radius: 4px; color: white; font-weight: bold; display: inline-block; }
     .tag-pill { background-color: #e3f2fd; color: #1565c0; padding: 2px 8px; border-radius: 10px; font-size: 0.8em; margin-right: 5px; }
-    .order-paper { background-color: #f8f9fa; border: 2px dashed #1565c0; padding: 20px; border-radius: 10px; font-family: monospace; color: #333; }
+    
+    /* V49 新增：流程懶人包樣式 */
+    .step-card {
+        background-color: #f1f8e9;
+        padding: 15px;
+        border-radius: 10px;
+        text-align: center;
+        border: 1px solid #81c784;
+        height: 100%;
+    }
+    .step-icon { font-size: 2.5em; display: block; margin-bottom: 10px; }
+    .step-title { font-weight: bold; font-size: 1.1em; color: #2e7d32; margin-bottom: 5px; }
+    .step-desc { font-size: 0.9em; color: #555; }
+    .arrow { font-size: 2em; color: #bdbdbd; text-align: center; padding-top: 30px;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -187,14 +201,11 @@ def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
     except: return random.choice(fallback_dict[car_type])
 
 # ==========================================
-# 4. 主程式 UI (V48：記憶體固化版)
+# 4. 主程式 UI (V49：流程懶人包版)
 # ==========================================
 def main():
-    # 🌟 初始化 Session State (網頁記憶體)
-    if 'search_clicked' not in st.session_state:
-        st.session_state['search_clicked'] = False
-    if 'results' not in st.session_state:
-        st.session_state['results'] = pd.DataFrame()
+    if 'search_clicked' not in st.session_state: st.session_state['search_clicked'] = False
+    if 'results' not in st.session_state: st.session_state['results'] = pd.DataFrame()
 
     with st.sidebar:
         st.header("🦅 設定控制台")
@@ -204,9 +215,50 @@ def main():
         else:
             api_key = st.text_input("Google API Key", type="password")
         st.info("💡 **無人自助委託**\n選定車款後，直接在下方生成「正式委託單」，複製給 Brian 即可啟動代標流程。")
-        st.caption("V48 (Persistence Edition)")
+        st.caption("V49 (Visual Flow Edition)")
 
     st.title("🦅 Brian's Auto Arbitrage | 拍場抄底神器")
+
+    # ==========================================
+    # 📖 代標流程懶人包 (Visual How-To)
+    # ==========================================
+    with st.container():
+        st.markdown("### 📖 30秒懂代標：你只需要做 4 件事")
+        c1, c2, c3, c4 = st.columns(4)
+        
+        with c1:
+            st.markdown("""
+            <div class='step-card'>
+                <span class='step-icon'>🔍</span>
+                <div class='step-title'>1. 智能選車</div>
+                <div class='step-desc'>用 AI 找出利潤空間最大的車，或直接看精選。</div>
+            </div>""", unsafe_allow_html=True)
+            
+        with c2:
+            st.markdown("""
+            <div class='step-card'>
+                <span class='step-icon'>📝</span>
+                <div class='step-title'>2. 自助委託</div>
+                <div class='step-desc'>在下方生成委託單，加 Line 傳給 Brian。</div>
+            </div>""", unsafe_allow_html=True)
+            
+        with c3:
+            st.markdown("""
+            <div class='step-card'>
+                <span class='step-icon'>💰</span>
+                <div class='step-title'>3. 匯款競標</div>
+                <div class='step-desc'>支付 3 萬訂金 (沒標到全額退)，我們幫你出價。</div>
+            </div>""", unsafe_allow_html=True)
+            
+        with c4:
+            st.markdown("""
+            <div class='step-card'>
+                <span class='step-icon'>🔑</span>
+                <div class='step-title'>4. 開心交車</div>
+                <div class='step-desc'>標到後付尾款，驗車過戶，把愛車開回家！</div>
+            </div>""", unsafe_allow_html=True)
+    
+    st.markdown("---")
     
     # 精選櫥窗
     st.markdown("### 🔥 本週精選 (Weekly Drops)")
@@ -237,25 +289,19 @@ def main():
     with col2: usage = st.selectbox("🎯 主要用途", ["極致省油代步", "家庭舒適空間", "業務通勤耐操", "面子社交商務", "熱血操控樂趣", "新手練車 (高折舊)"])
     with col3: brand = st.selectbox("🚗 優先品牌", brand_options)
 
-    # 🌟 搜尋按鈕邏輯修正
     if st.button("🔍 啟動 AI 差異化對決"):
-        if status != "SUCCESS":
-            st.error("⚠️ 資料庫讀取失敗")
+        if status != "SUCCESS": st.error("⚠️ 資料庫讀取失敗")
         else:
             with st.spinner("🤖 正在執行 TCO 財務模型分析..."):
                 time.sleep(1.0) 
-                # 計算並存入 Session State
                 results = recommend_cars(df, budget, usage, brand)
                 st.session_state['results'] = results
                 st.session_state['search_clicked'] = True
 
-    # 🌟 顯示結果 (即使重新整理也會顯示)
     if st.session_state['search_clicked']:
         results = st.session_state['results']
-        
         if not results.empty:
             st.success(f"✅ AI 鎖定了 **{len(results)} 台** 最佳獲利標的。")
-            
             for i, (index, row) in enumerate(results.iterrows()):
                 car_name = row['車款名稱']
                 market_p = row['預估市價']
@@ -263,42 +309,28 @@ def main():
                 savings = row['潛在省錢']
                 role = row.get('Role', '推薦標的')
                 role_bg = "#d32f2f" if "首選" in role else "#1976d2" if "競品" in role else "#616161"
-                
                 with st.container():
                     st.markdown(f"""<div class='card-box'>""", unsafe_allow_html=True)
                     c_title, c_badge = st.columns([3, 1])
                     with c_title: st.markdown(f"### {role}: {car_name}")
                     with c_badge: st.markdown(f"<span class='role-tag' style='background-color:{role_bg}; float:right;'>{role}</span>", unsafe_allow_html=True)
-                    
                     m1, m2, m3 = st.columns(3)
                     m1.metric("市場行情", f"{int(market_p/10000)} 萬")
                     m2.metric("拍場預估", f"{int(cost_p/10000)} 萬", delta="Wholesale", delta_color="inverse")
                     m3.metric("Arbitrage", f"{int(savings/10000)} 萬", delta="Spread", delta_color="normal")
-                    
                     if api_key:
                         advice = get_ai_advice(api_key, car_name, cost_p, market_p, savings)
                         st.markdown(f"<div style='background:#f9f9f9; padding:15px; border-left:5px solid {role_bg}; border-radius:5px; color:#333;'><b>🤖 AI 投資觀點：</b><br>{advice}</div>", unsafe_allow_html=True)
                     st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.warning(f"⚠️ 找不到符合條件的車。")
+        else: st.warning(f"⚠️ 找不到符合條件的車。")
 
-    # ==========================================
-    # 🔥 自助委託結單 (資料源整合修正)
-    # ==========================================
     st.markdown("---")
     st.header("📝 自助委託結單 (Self-Service Kiosk)")
-    
     with st.form("order_form"):
-        # 整合精選車 + AI 搜尋結果到選單中
         car_choices = ["請選擇車款..."]
-        
-        # 1. 加入本週精選
         car_choices += [f"🔥 {c['name']}" for c in FEATURED_CARS]
-        
-        # 2. 加入 AI 搜尋結果 (如果有)
         if st.session_state['search_clicked'] and not st.session_state['results'].empty:
             car_choices += st.session_state['results']['車款名稱'].tolist()
-            
         car_choices.append("其他 (手動輸入)")
         
         c1, c2 = st.columns(2)
@@ -306,34 +338,19 @@ def main():
             target_car = st.selectbox("📦 您想委託的標的", car_choices)
             custom_car = st.text_input("手動輸入車款 (若選其他)", placeholder="例如: 2021 Toyota Corolla Cross")
             final_car = custom_car if target_car == "其他 (手動輸入)" else target_car
-            
         with c2:
             max_bid = st.number_input("💰 最高投標上限 (萬)", min_value=10, max_value=500, step=1, help="含手續費的總預算")
             line_id = st.text_input("📲 您的 Line ID", placeholder="方便我們聯絡您")
         
         requirements = st.text_area("📋 其他需求備註", placeholder="例如：只要白色、不要有菸味、一定要有跟車系統...")
-        
         submitted = st.form_submit_button("🖨️ 生成正式委託單")
         
         if submitted:
-            if final_car == "請選擇車款..." and not custom_car:
-                st.error("❌ 請選擇或輸入車款")
-            elif not line_id:
-                st.error("❌ 請輸入 Line ID 以便聯絡")
+            if final_car == "請選擇車款..." and not custom_car: st.error("❌ 請選擇或輸入車款")
+            elif not line_id: st.error("❌ 請輸入 Line ID 以便聯絡")
             else:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-                order_text = f"""
-【Brian Auto Arbitrage 委託單】
---------------------------------
-📅 日期: {timestamp}
-👤 客戶 Line: {line_id}
-🚗 目標車款: {final_car}
-💰 投標上限: {max_bid} 萬 (含稅/手續費)
-📋 特別需求: {requirements if requirements else '無'}
---------------------------------
-🤖 此單由 AI 系統自動生成
-確認無誤後，請將此訊息傳送給 Brian。
-"""
+                order_text = f"【Brian Auto Arbitrage 委託單】\n--------------------------------\n📅 日期: {timestamp}\n👤 客戶 Line: {line_id}\n🚗 目標車款: {final_car}\n💰 投標上限: {max_bid} 萬 (含稅/手續費)\n📋 特別需求: {requirements if requirements else '無'}\n--------------------------------\n🤖 此單由 AI 系統自動生成\n確認無誤後，請將此訊息傳送給 Brian。"
                 st.success("✅ 委託單生成成功！")
                 st.markdown("請點擊右上角複製按鈕，或手動複製下方內容，傳送到 Line 群組。")
                 st.code(order_text, language="text")
