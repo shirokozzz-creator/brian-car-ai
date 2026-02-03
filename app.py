@@ -5,6 +5,7 @@ import os
 import random
 import time
 from datetime import datetime
+from PIL import Image
 
 # ==========================================
 # 0. 核心設定
@@ -41,7 +42,6 @@ FEATURED_CARS = [
 
 st.markdown("""
     <style>
-    /* 卡片與按鈕樣式 */
     .card-box { background-color: #ffffff; padding: 20px; border-radius: 10px; border: 1px solid #e0e0e0; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
     .featured-card { background: linear-gradient(135deg, #fff8e1 0%, #ffffff 100%); padding: 20px; border-radius: 12px; border: 2px solid #ffb300; box-shadow: 0 6px 12px rgba(255, 179, 0, 0.2); margin-bottom: 25px; position: relative; }
     .featured-badge { position: absolute; top: -12px; right: 20px; background-color: #d32f2f; color: white; padding: 4px 12px; border-radius: 20px; font-weight: bold; font-size: 0.9em; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
@@ -49,20 +49,11 @@ st.markdown("""
     .stButton>button:hover { background-color: #0d47a1; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
     .role-tag { font-size: 0.8em; padding: 4px 8px; border-radius: 4px; color: white; font-weight: bold; display: inline-block; }
     .tag-pill { background-color: #e3f2fd; color: #1565c0; padding: 2px 8px; border-radius: 10px; font-size: 0.8em; margin-right: 5px; }
-    
-    /* V49 新增：流程懶人包樣式 */
-    .step-card {
-        background-color: #f1f8e9;
-        padding: 15px;
-        border-radius: 10px;
-        text-align: center;
-        border: 1px solid #81c784;
-        height: 100%;
-    }
+    .step-card { background-color: #f1f8e9; padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #81c784; height: 100%; }
     .step-icon { font-size: 2.5em; display: block; margin-bottom: 10px; }
     .step-title { font-weight: bold; font-size: 1.1em; color: #2e7d32; margin-bottom: 5px; }
     .step-desc { font-size: 0.9em; color: #555; }
-    .arrow { font-size: 2em; color: #bdbdbd; text-align: center; padding-top: 30px;}
+    .admin-box { background-color: #263238; color: #eceff1; padding: 15px; border-radius: 10px; border-left: 5px solid #ffab00; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -175,33 +166,43 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
     return pd.DataFrame(final_list)
 
 # ==========================================
-# 3. AI 投資顧問
+# 3. AI 投資顧問 & 驗車官
 # ==========================================
 def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
-    luxury_brands = ['BENZ', 'BMW', 'LEXUS', 'AUDI', 'VOLVO', 'PORSCHE', 'INFINITI']
-    fun_brands = ['MAZDA', 'MINI', 'SUBARU', 'GOLF', 'FOCUS', '86', 'SUPRA', 'GTI', 'WRX']
-    car_type = "economy"
-    if any(b in car_name for b in luxury_brands): car_type = "luxury"
-    elif any(b in car_name for b in fun_brands): car_type = "fun"
-    
-    fallback_dict = {
-        "luxury": ["此車款歷史折舊已趨緩，現在進場資金利用率最高。對商務人士來說，這是極高 CP 值的社交門票。", "以這種成本取得豪華品牌，是極為聰明的資產配置。"],
-        "economy": ["標準的『現金流守護者』。超低持有成本加上極高流通性，這筆交易在財務上絕對是正期望值。", "拍場行情顯示此車款極少跌破此價格。現在入手，等於是買在安全邊際之上。"],
-        "fun": ["用這種成本買到這種樂趣，是男人最划算的玩具投資。歷史成交紀錄顯示此類車款極為搶手。", "這種性能車款流通性好，玩個兩年再賣掉，折舊損失微乎其微。"]
-    }
+    # ... (原有代碼) ...
     genai.configure(api_key=api_key)
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
-        if car_type == "luxury": prompt_theme = "強調『面子、社交槓桿』。"
-        elif car_type == "fun": prompt_theme = "強調『情緒價值、玩具屬性』。"
-        else: prompt_theme = "強調『實用主義、TCO極小化』。"
-        prompt = f"你是投資汽車顧問。標的：{car_name} (市價{int(market_price/10000)}萬 vs 底價{int(wholesale_price/10000)}萬)。請用60字內給出建議，策略：{prompt_theme}。Strong Buy。"
+        prompt = f"你是投資汽車顧問。標的：{car_name} (市價{int(market_price/10000)}萬 vs 底價{int(wholesale_price/10000)}萬)。請用60字內給出建議，Strong Buy。"
         response = model.generate_content(prompt)
         return response.text
-    except: return random.choice(fallback_dict[car_type])
+    except: return "AI 分析：數據顯示此車款目前位於折舊甜蜜點，拍場價格極具優勢。"
+
+# V50 新增：AI 驗車官功能
+def analyze_inspection_sheet(api_key, image):
+    genai.configure(api_key=api_key)
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = """
+        你是一位專業的中古車查定師。請分析這張『車輛查定表』(Vehicle Inspection Sheet)。
+        
+        請輸出以下結構化報告 (繁體中文)：
+        1. **【車輛基本資料】**：年份、廠牌車型、里程數。
+        2. **【關鍵評級】**：車體評級 (Grade)、內裝評級。告訴我這分數代表什麼意思 (例如 D級代表有結構傷)。
+        3. **【重大車況警示】**：仔細看車體結構圖，有沒有 'X' (更換) 或 'R' (修復)？如果有，是在哪裡 (例如後樑、門板)？這對安全性或價值有什麼影響？
+        4. **【Brian 的建議】**：根據以上狀況，給出一個簡單的結論。例如：「此車為事故車，建議新手勿碰」或「車況極佳，可以放心下標」。
+        
+        語氣要專業、客觀，直接講重點，不要廢話。
+        """
+        
+        response = model.generate_content([prompt, image])
+        return response.text
+    except Exception as e:
+        return f"AI 解析失敗：{str(e)}"
 
 # ==========================================
-# 4. 主程式 UI (V49：流程懶人包版)
+# 4. 主程式 UI
 # ==========================================
 def main():
     if 'search_clicked' not in st.session_state: st.session_state['search_clicked'] = False
@@ -214,49 +215,41 @@ def main():
             st.success("✅ AI 顧問已連線")
         else:
             api_key = st.text_input("Google API Key", type="password")
-        st.info("💡 **無人自助委託**\n選定車款後，直接在下方生成「正式委託單」，複製給 Brian 即可啟動代標流程。")
-        st.caption("V49 (Visual Flow Edition)")
+        
+        # === 🔥 V50 新增：管理員後台 (AI 驗車官) ===
+        st.markdown("---")
+        with st.expander("🔐 管理員專用：查定表分析"):
+            admin_pwd = st.text_input("請輸入管理密碼", type="password")
+            if admin_pwd == "brian888": # 設定你的密碼
+                st.success("身分驗證成功：Brian")
+                uploaded_sheet = st.file_uploader("上傳查定表 (圖片)", type=['jpg', 'png', 'jpeg'])
+                
+                if uploaded_sheet and st.button("🔍 啟動 AI 驗車"):
+                    with st.spinner("🤖 AI 正在檢查大樑與結構..."):
+                        img = Image.open(uploaded_sheet)
+                        st.image(img, caption="查定表預覽", use_column_width=True)
+                        
+                        report = analyze_inspection_sheet(api_key, img)
+                        
+                        st.markdown("<div class='admin-box'>", unsafe_allow_html=True)
+                        st.markdown("### 📋 AI 驗車報告 (可直接複製傳給客戶)")
+                        st.markdown(report)
+                        st.markdown("</div>", unsafe_allow_html=True)
+            elif admin_pwd:
+                st.error("密碼錯誤")
 
     st.title("🦅 Brian's Auto Arbitrage | 拍場抄底神器")
 
     # ==========================================
-    # 📖 代標流程懶人包 (Visual How-To)
+    # 📖 代標流程懶人包
     # ==========================================
     with st.container():
         st.markdown("### 📖 30秒懂代標：你只需要做 4 件事")
         c1, c2, c3, c4 = st.columns(4)
-        
-        with c1:
-            st.markdown("""
-            <div class='step-card'>
-                <span class='step-icon'>🔍</span>
-                <div class='step-title'>1. 智能選車</div>
-                <div class='step-desc'>用 AI 找出利潤空間最大的車，或直接看精選。</div>
-            </div>""", unsafe_allow_html=True)
-            
-        with c2:
-            st.markdown("""
-            <div class='step-card'>
-                <span class='step-icon'>📝</span>
-                <div class='step-title'>2. 自助委託</div>
-                <div class='step-desc'>在下方生成委託單，加 Line 傳給 Brian。</div>
-            </div>""", unsafe_allow_html=True)
-            
-        with c3:
-            st.markdown("""
-            <div class='step-card'>
-                <span class='step-icon'>💰</span>
-                <div class='step-title'>3. 匯款競標</div>
-                <div class='step-desc'>支付 3 萬訂金 (沒標到全額退)，我們幫你出價。</div>
-            </div>""", unsafe_allow_html=True)
-            
-        with c4:
-            st.markdown("""
-            <div class='step-card'>
-                <span class='step-icon'>🔑</span>
-                <div class='step-title'>4. 開心交車</div>
-                <div class='step-desc'>標到後付尾款，驗車過戶，把愛車開回家！</div>
-            </div>""", unsafe_allow_html=True)
+        with c1: st.markdown("<div class='step-card'><span class='step-icon'>🔍</span><div class='step-title'>1. 智能選車</div><div class='step-desc'>用 AI 找出利潤空間最大的車，或直接看精選。</div></div>", unsafe_allow_html=True)
+        with c2: st.markdown("<div class='step-card'><span class='step-icon'>📝</span><div class='step-title'>2. 自助委託</div><div class='step-desc'>在下方生成委託單，加 Line 傳給 Brian。</div></div>", unsafe_allow_html=True)
+        with c3: st.markdown("<div class='step-card'><span class='step-icon'>💰</span><div class='step-title'>3. 匯款競標</div><div class='step-desc'>支付 3 萬訂金 (沒標到全額退)，我們幫你出價。</div></div>", unsafe_allow_html=True)
+        with c4: st.markdown("<div class='step-card'><span class='step-icon'>🔑</span><div class='step-title'>4. 開心交車</div><div class='step-desc'>標到後付尾款，驗車過戶，把愛車開回家！</div></div>", unsafe_allow_html=True)
     
     st.markdown("---")
     
