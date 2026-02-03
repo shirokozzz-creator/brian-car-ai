@@ -1,29 +1,10 @@
 import streamlit as st
-import sys
-import subprocess
-import os
-
-# ==========================================
-# 🛠️ 強制修復區：自動升級 AI 套件 (核彈級解法)
-# ==========================================
-# 這段程式碼會強迫伺服器安裝最新版，不管它原本想用舊版
-try:
-    import google.generativeai as genai
-    # 檢查版本，如果太舊就強制升級
-    current_version = getattr(genai, '__version__', '0.0.0')
-    if current_version < "0.7.0":
-        raise ImportError("Version too old")
-except (ImportError, AttributeError):
-    print("⚠️ 偵測到舊版套件，正在強制升級 google-generativeai...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-U", "google-generativeai>=0.7.0"])
-    import google.generativeai as genai
-
-# 重新載入其他套件
+import google.generativeai as genai
 import pandas as pd
+import os
 import random
 import time
 from datetime import datetime
-from PIL import Image
 
 # ==========================================
 # 0. 核心設定
@@ -67,11 +48,14 @@ st.markdown("""
     .stButton>button:hover { background-color: #0d47a1; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
     .role-tag { font-size: 0.8em; padding: 4px 8px; border-radius: 4px; color: white; font-weight: bold; display: inline-block; }
     .tag-pill { background-color: #e3f2fd; color: #1565c0; padding: 2px 8px; border-radius: 10px; font-size: 0.8em; margin-right: 5px; }
+    
+    /* V55 新增：信任感區塊樣式 */
     .step-card { background-color: #f1f8e9; padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #81c784; height: 100%; }
     .step-icon { font-size: 2.5em; display: block; margin-bottom: 10px; }
     .step-title { font-weight: bold; font-size: 1.1em; color: #2e7d32; margin-bottom: 5px; }
     .step-desc { font-size: 0.9em; color: #555; }
-    .admin-box { background-color: #263238; color: #eceff1; padding: 15px; border-radius: 10px; border-left: 5px solid #ffab00; }
+    .trust-box { background-color: #e3f2fd; padding: 20px; border-radius: 10px; border-left: 5px solid #1565c0; margin-bottom: 20px; }
+    .auction-logo { font-size: 1.5em; font-weight: bold; color: #1565c0; }
     .order-paper { background-color: #f8f9fa; border: 2px dashed #1565c0; padding: 20px; border-radius: 10px; font-family: monospace; color: #333; }
     </style>
     """, unsafe_allow_html=True)
@@ -185,7 +169,7 @@ def recommend_cars(df, budget_limit, usage, brand_pref):
     return pd.DataFrame(final_list)
 
 # ==========================================
-# 3. AI 投資顧問 & 驗車官 (多重備援)
+# 3. AI 投資顧問
 # ==========================================
 def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
     genai.configure(api_key=api_key)
@@ -195,41 +179,6 @@ def get_ai_advice(api_key, car_name, wholesale_price, market_price, savings):
         response = model.generate_content(prompt)
         return response.text
     except: return "AI 分析：數據顯示此車款目前位於折舊甜蜜點，拍場價格極具優勢。"
-
-def analyze_inspection_sheet(api_key, image):
-    genai.configure(api_key=api_key)
-    
-    # 自動切換模型，直到成功
-    candidate_models = [
-        'gemini-1.5-flash', 
-        'gemini-1.5-pro',
-        'gemini-pro-vision' 
-    ]
-    
-    last_error = ""
-    prompt = """
-    你是一位專業的中古車查定師。請分析這張『車輛查定表』(Vehicle Inspection Sheet)。
-    
-    請輸出以下結構化報告 (繁體中文)：
-    1. **【車輛基本資料】**：年份、廠牌車型、里程數。
-    2. **【關鍵評級】**：車體評級 (Grade)、內裝評級。請解釋評級含義 (例如 D級=結構受損)。
-    3. **【重大車況警示】**：請仔細辨識車體結構圖，尋找 'X' (更換) 或 'R' (修復) 標記。若有，請指出位置 (如：後圍板、劍尾、大樑)。
-    4. **【文字備註解讀】**：請讀取表格中的手寫或打字備註 (例如：後工字樑更換)。
-    5. **【Brian 的建議】**：綜合以上，給出買入建議 (推薦/不推薦/需專業評估)。
-    
-    語氣專業、客觀。
-    """
-
-    for model_name in candidate_models:
-        try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content([prompt, image])
-            return response.text, model_name # 成功
-        except Exception as e:
-            last_error = str(e)
-            continue 
-
-    return f"AI 解析失敗 (請確認 API Key 是否正確): {last_error}", None
 
 # ==========================================
 # 4. 主程式 UI
@@ -245,44 +194,84 @@ def main():
             st.success("✅ AI 顧問已連線")
         else:
             api_key = st.text_input("Google API Key", type="password")
-        
-        # 管理員後台
-        st.markdown("---")
-        with st.expander("🔐 管理員專用：查定表分析"):
-            admin_pwd = st.text_input("請輸入管理密碼", type="password")
-            if admin_pwd == "brian888": 
-                st.success("身分驗證成功：Brian")
-                uploaded_sheet = st.file_uploader("上傳查定表 (圖片)", type=['jpg', 'png', 'jpeg'])
-                
-                if uploaded_sheet and st.button("🔍 啟動 AI 驗車"):
-                    with st.spinner("🤖 AI 正在掃描結構 (自動偵測模型)..."):
-                        img = Image.open(uploaded_sheet)
-                        st.image(img, caption="查定表預覽", use_column_width=True)
-                        if api_key:
-                            report, used_model = analyze_inspection_sheet(api_key, img)
-                            st.markdown("<div class='admin-box'>", unsafe_allow_html=True)
-                            if used_model:
-                                st.caption(f"✅ 使用模型: {used_model}")
-                                st.markdown("### 📋 AI 驗車報告 (可直接複製傳給客戶)")
-                                st.markdown(report)
-                            else:
-                                st.error(report)
-                            st.markdown("</div>", unsafe_allow_html=True)
-                        else:
-                            st.error("請先輸入 API Key")
-            elif admin_pwd:
-                st.error("密碼錯誤")
+        st.info("💡 **無人自助委託**\n選定車款後，直接在下方生成「正式委託單」，複製給 Brian 即可啟動代標流程。")
+        st.caption("V55 (Trust & Authority)")
 
     st.title("🦅 Brian's Auto Arbitrage | 拍場抄底神器")
 
-    # 30秒懶人包
+    # ==========================================
+    # 🏢 信任基石：拍場介紹 (Authority Borrowing)
+    # ==========================================
+    st.markdown("### 🏢 為什麼這麼便宜？因為我們直通源頭")
+    st.markdown("Brian 不賣車，Brian 是幫你拿到 **「車商入場券」** 的人。我們的貨源來自台灣兩大權威拍場：")
+    
+    c_trust1, c_trust2 = st.columns(2)
+    with c_trust1:
+        st.markdown("""
+        <div class='trust-box'>
+            <div class='auction-logo'>🔵 HAA 和運勁拍 (Toyota 集團)</div>
+            <ul>
+                <li><b>背景：</b>和泰汽車 (Toyota/Lexus 總代理) 旗下企業。</li>
+                <li><b>特色：</b>全台最嚴格日式查定標準。</li>
+                <li><b>優勢：</b>車況透明，絕無調表、泡水、重大事故隱瞞。</li>
+                <li><b>一句話：</b>買 HAA 的車，等於買 Toyota 原廠認證的安心。</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with c_trust2:
+        st.markdown("""
+        <div class='trust-box'>
+            <div class='auction-logo'>🔴 SAA 行將拍賣 (裕隆集團)</div>
+            <ul>
+                <li><b>背景：</b>裕隆集團 (Nissan/Mitsubishi) 旗下企業。</li>
+                <li><b>特色：</b>全台最大中古車批發中心，流通量第一。</li>
+                <li><b>優勢：</b>大量公司租賃車退役，保養紀錄齊全。</li>
+                <li><b>一句話：</b>這裡就是全台灣車商進貨的「好市多」，便宜量大。</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ==========================================
+    # 📖 代標流程懶人包 (Trust Enhanced)
+    # ==========================================
     with st.container():
-        st.markdown("### 📖 30秒懂代標：你只需要做 4 件事")
+        st.markdown("### 📖 4 步驟安心代標流程 (含合約保障)")
         c1, c2, c3, c4 = st.columns(4)
-        with c1: st.markdown("<div class='step-card'><span class='step-icon'>🔍</span><div class='step-title'>1. 智能選車</div><div class='step-desc'>用 AI 找出利潤空間最大的車，或直接看精選。</div></div>", unsafe_allow_html=True)
-        with c2: st.markdown("<div class='step-card'><span class='step-icon'>📝</span><div class='step-title'>2. 自助委託</div><div class='step-desc'>在下方生成委託單，加 Line 傳給 Brian。</div></div>", unsafe_allow_html=True)
-        with c3: st.markdown("<div class='step-card'><span class='step-icon'>💰</span><div class='step-title'>3. 匯款競標</div><div class='step-desc'>支付 3 萬訂金 (沒標到全額退)，我們幫你出價。</div></div>", unsafe_allow_html=True)
-        with c4: st.markdown("<div class='step-card'><span class='step-icon'>🔑</span><div class='step-title'>4. 開心交車</div><div class='step-desc'>標到後付尾款，驗車過戶，把愛車開回家！</div></div>", unsafe_allow_html=True)
+        
+        with c1:
+            st.markdown("""
+            <div class='step-card'>
+                <span class='step-icon'>🔍</span>
+                <div class='step-title'>1. 智能選車</div>
+                <div class='step-desc'>用 AI 試算利潤，或瀏覽下方精選，找出最划算標的。</div>
+            </div>""", unsafe_allow_html=True)
+            
+        with c2:
+            st.markdown("""
+            <div class='step-card'>
+                <span class='step-icon'>📝</span>
+                <div class='step-title'>2. 簽約委託</div>
+                <div class='step-desc'>雙方簽署<b>「代標委任契約書」</b>，白紙黑字保障權益。</div>
+            </div>""", unsafe_allow_html=True)
+            
+        with c3:
+            st.markdown("""
+            <div class='step-card'>
+                <span class='step-icon'>💰</span>
+                <div class='step-title'>3. 履約保證</div>
+                <div class='step-desc'>匯款 3 萬保證金。<b>若未得標，保證金 100% 全額退還。</b></div>
+            </div>""", unsafe_allow_html=True)
+            
+        with c4:
+            st.markdown("""
+            <div class='step-card'>
+                <span class='step-icon'>🔑</span>
+                <div class='step-title'>4. 驗收交車</div>
+                <div class='step-desc'>提供<b>「原始查定表」</b>與發票，產權清楚，開心過戶。</div>
+            </div>""", unsafe_allow_html=True)
     
     st.markdown("---")
     
